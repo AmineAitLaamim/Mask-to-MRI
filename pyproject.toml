@@ -1,0 +1,14 @@
+[project]
+name = "mask-to-mri"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "albumentations>=2.0.8",
+    "opencv-python>=4.13.0.92",
+    "pyyaml>=6.0.3",
+    "tifffile>=2026.3.3",
+    "torch>=2.11.0",
+    "torchvision>=0.26.0",
+]
