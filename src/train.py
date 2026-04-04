@@ -1,0 +1,334 @@
+"""
+pix2pix training loop.
+
+Implements the step-by-step procedure from the specification:
+  1. Sample (mask, real_MRI) pair
+  2. Forward pass: fake_MRI = G(mask)
+  3. Train discriminator (real + fake)
+  4. Train generator (adversarial + L1)
+  5. Log losses, save checkpoints + sample grids every N epochs
+"""
+
+import os
+from pathlib import Path
+
+import torch
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+from .generator import UNetGenerator
+from .discriminator import PatchGANDiscriminator
+from .losses import GANLoss, discriminator_loss_real, discriminator_loss_fake
+
+
+# ---------------------------------------------------------------------------
+# Learning rate scheduler (original pix2pix: constant then linear decay)
+# ---------------------------------------------------------------------------
+
+class LinearLRDecay:
+    """
+    Learning rate schedule from the original pix2pix paper:
+      - Epochs 0..decay_start: constant LR
+      - Epochs decay_start..epochs: linearly decay to 0
+    """
+
+    def __init__(self, optimizer, lr: float, total_epochs: int, decay_start: int):
+        self.optimizer = optimizer
+        self.lr = lr
+        self.total_epochs = total_epochs
+        self.decay_start = decay_start
+        self.current_epoch = 0
+
+    def step(self):
+        self.current_epoch += 1
+        if self.current_epoch > self.decay_start:
+            # Linear decay: lr goes from initial to 0
+            frac = (self.current_epoch - self.decay_start) / (self.total_epochs - self.decay_start)
+            new_lr = self.lr * (1.0 - frac)
+        else:
+            new_lr = self.lr
+
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = new_lr
+
+    def get_lr(self) -> float:
+        return self.optimizer.param_groups[0]["lr"]
+
+
+# ---------------------------------------------------------------------------
+# Training step
+# ---------------------------------------------------------------------------
+
+def _train_one_batch(
+    mask_batch: torch.Tensor,
+    real_mri: torch.Tensor,
+    generator: UNetGenerator,
+    discriminator: PatchGANDiscriminator,
+    opt_G: optim.Optimizer,
+    opt_D: optim.Optimizer,
+    gan_criterion: GANLoss,
+    device: torch.device,
+) -> dict[str, float]:
+    """
+    Perform one training step (one batch) for both D and G.
+
+    Returns dict of loss values for logging.
+    """
+    mask_batch = mask_batch.to(device)
+    real_mri = real_mri.to(device)
+
+    # ----- Step 1: Generate fake MRI -----
+    fake_mri = generator(mask_batch)
+
+    # ----- Step 2: Train Discriminator -----
+    opt_D.zero_grad()
+
+    # Real pair
+    d_real_pred = discriminator(mask_batch, real_mri)
+    loss_D_real = discriminator_loss_real(d_real_pred)
+
+    # Fake pair (detach generator output)
+    d_fake_pred = discriminator(mask_batch, fake_mri.detach())
+    loss_D_fake = discriminator_loss_fake(d_fake_pred)
+
+    loss_D = (loss_D_real + loss_D_fake) * 0.5
+    loss_D.backward()
+    opt_D.step()
+
+    # ----- Step 3: Train Generator -----
+    opt_G.zero_grad()
+
+    # Re-use d_fake_pred (or recompute without detach)
+    d_fake_pred_g = discriminator(mask_batch, fake_mri)
+    loss_G, loss_G_adv, loss_G_L1 = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
+    loss_G.backward()
+    opt_G.step()
+
+    return {
+        "loss_D": loss_D.item(),
+        "loss_G": loss_G.item(),
+        "loss_G_adv": loss_G_adv.item(),
+        "loss_G_L1": loss_G_L1.item(),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main training loop
+# ---------------------------------------------------------------------------
+
+def train(
+    train_loader: DataLoader,
+    val_loader: DataLoader,
+    generator: UNetGenerator,
+    discriminator: PatchGANDiscriminator,
+    config: dict,
+    device: torch.device,
+    checkpoint_dir: str = "outputs/checkpoints",
+    samples_dir: str = "outputs/samples",
+) -> list[dict]:
+    """
+    Run the full pix2pix training loop.
+
+    Args:
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        generator: U-Net generator
+        discriminator: PatchGAN discriminator
+        config: Configuration dict (from config.yaml)
+        device: torch.device
+        checkpoint_dir: Directory to save checkpoints
+        samples_dir: Directory to save sample grids
+
+    Returns:
+        List of per-epoch loss dicts for plotting.
+    """
+    training_cfg = config["training"]
+    epochs = training_cfg["epochs"]
+    lr = training_cfg["lr"]
+    beta1 = training_cfg["beta1"]
+    beta2 = training_cfg.get("beta2", 0.999)
+    lambda_l1 = training_cfg["lambda_l1"]
+    save_every = training_cfg.get("save_every", 5)
+
+    # Optimizers
+    opt_G = optim.Adam(generator.parameters(), lr=lr, betas=(beta1, beta2))
+    opt_D = optim.Adam(discriminator.parameters(), lr=lr, betas=(beta1, beta2))
+
+    # LR scheduler: constant for first half, linear decay for second half
+    decay_start = epochs // 2
+    lr_scheduler_G = LinearLRDecay(opt_G, lr, epochs, decay_start)
+    lr_scheduler_D = LinearLRDecay(opt_D, lr, epochs, decay_start)
+
+    # Loss
+    gan_criterion = GANLoss(lambda_l1=lambda_l1)
+
+    # History
+    history = []
+
+    print(f"\nTraining pix2pix for {epochs} epochs")
+    print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}")
+    print(f"  Schedule: {decay_start} epochs constant + {decay_start} epochs linear decay")
+    print(f"  Checkpoint every {save_every} epochs")
+    print()
+
+    for epoch in range(1, epochs + 1):
+        # Training phase
+        generator.train()
+        discriminator.train()
+
+        epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0}
+        n_batches = 0
+
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
+        for mask_batch, real_mri in pbar:
+            losses = _train_one_batch(
+                mask_batch, real_mri,
+                generator, discriminator,
+                opt_G, opt_D,
+                gan_criterion, device,
+            )
+            for k, v in losses.items():
+                epoch_losses[k] += v
+            n_batches += 1
+
+            pbar.set_postfix({
+                "D": f"{losses['loss_D']:.4f}",
+                "G": f"{losses['loss_G']:.4f}",
+            })
+
+        # Average losses
+        for k in epoch_losses:
+            epoch_losses[k] /= n_batches
+
+        # LR step
+        lr_scheduler_G.step()
+        lr_scheduler_D.step()
+        epoch_losses["lr"] = lr_scheduler_G.get_lr()
+        epoch_losses["epoch"] = epoch
+
+        history.append(epoch_losses)
+
+        # Logging
+        print(
+            f"Epoch {epoch}/{epochs} | "
+            f"D: {epoch_losses['loss_D']:.4f} | "
+            f"G: {epoch_losses['loss_G']:.4f} | "
+            f"G_adv: {epoch_losses['loss_G_adv']:.4f} | "
+            f"G_L1: {epoch_losses['loss_G_L1']:.4f} | "
+            f"LR: {epoch_losses['lr']:.6f}"
+        )
+
+        # Save checkpoint + sample grid every N epochs
+        if epoch % save_every == 0 or epoch == epochs:
+            _save_checkpoint(generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir)
+            _save_sample_grid(
+                generator, val_loader, epoch, samples_dir, device
+            )
+
+    print("\nTraining complete.")
+    return history
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint saving
+# ---------------------------------------------------------------------------
+
+def _save_checkpoint(
+    generator: UNetGenerator,
+    discriminator: PatchGANDiscriminator,
+    opt_G: optim.Optimizer,
+    opt_D: optim.Optimizer,
+    epoch: int,
+    checkpoint_dir: str,
+):
+    """Save model weights and optimizer state."""
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
+    torch.save({
+        "epoch": epoch,
+        "generator_state_dict": generator.state_dict(),
+        "discriminator_state_dict": discriminator.state_dict(),
+        "opt_G_state_dict": opt_G.state_dict(),
+        "opt_D_state_dict": opt_D.state_dict(),
+    }, path)
+    print(f"  → Saved checkpoint: {path}")
+
+
+def load_checkpoint(
+    path: str,
+    generator: UNetGenerator,
+    discriminator: PatchGANDiscriminator,
+    opt_G: optim.Optimizer | None = None,
+    opt_D: optim.Optimizer | None = None,
+) -> int:
+    """
+    Load a checkpoint. Returns the epoch number.
+    Optimizers are optional (useful for resuming training).
+    """
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    generator.load_state_dict(checkpoint["generator_state_dict"])
+    discriminator.load_state_dict(checkpoint["discriminator_state_dict"])
+    if opt_G is not None:
+        opt_G.load_state_dict(checkpoint["opt_G_state_dict"])
+    if opt_D is not None:
+        opt_D.load_state_dict(checkpoint["opt_D_state_dict"])
+    return checkpoint["epoch"]
+
+
+# ---------------------------------------------------------------------------
+# Sample grid generation
+# ---------------------------------------------------------------------------
+
+def _save_sample_grid(
+    generator: UNetGenerator,
+    val_loader: DataLoader,
+    epoch: int,
+    samples_dir: str,
+    device: torch.device,
+    n_samples: int = 4,
+):
+    """Generate a mask | fake | real grid and save as PNG."""
+    import numpy as np
+    from PIL import Image
+
+    os.makedirs(samples_dir, exist_ok=True)
+
+    generator.eval()
+
+    # Grab n_samples from val loader
+    samples = []
+    with torch.no_grad():
+        for mask, real in val_loader:
+            if len(samples) >= n_samples:
+                break
+            mask = mask.to(device)
+            real = real.to(device)
+            fake = generator(mask)
+
+            # Denormalize: [-1,1] → [0,255]
+            # Mask: (1, H, W) → squeeze
+            mask_np = ((mask[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+            # Real: (3, H, W) → H×W×3
+            real_np = ((real[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+            # Fake: (3, H, W) → H×W×3
+            fake_np = ((fake[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+
+            samples.append((mask_np, fake_np, real_np))
+
+    # Build grid: 3 columns × n_samples rows
+    # Each row: mask | fake | real (side by side)
+    rows = []
+    for mask_np, fake_np, real_np in samples:
+        # Convert mask to 3-channel for display
+        mask_3ch = np.stack([mask_np] * 3, axis=-1)
+        row = np.concatenate([mask_3ch, fake_np, real_np], axis=1)  # (H, 3*W, 3)
+        rows.append(row)
+
+    grid = np.concatenate(rows, axis=0)  # (n_samples*H, 3*W, 3)
+
+    # Save
+    img = Image.fromarray(grid)
+    path = os.path.join(samples_dir, f"samples_epoch_{epoch}.png")
+    img.save(path)
+    print(f"  → Saved sample grid: {path}")

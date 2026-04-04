@@ -1,13 +1,19 @@
 [project]
 name = "mask-to-mri"
 version = "0.1.0"
-description = "Add your description here"
+description = "Synthetic MRI Generation with pix2pix — Train a conditional GAN to generate realistic brain MRI slices from tumor segmentation masks."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "albumentations>=2.0.8",
+    "matplotlib>=3.10.0",
+    "numpy>=2.0.0",
     "opencv-python>=4.13.0.92",
+    "pdfplumber>=0.11.9",
+    "pytorch-fid>=0.3.0",
     "pyyaml>=6.0.3",
+    "scikit-image>=0.25.0",
+    "segmentation-models-pytorch>=0.5.0",
     "tifffile>=2026.3.3",
     "torch>=2.11.0",
     "torchvision>=0.26.0",

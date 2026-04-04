@@ -1,0 +1,30 @@
+# ============================================================
+# mask-to-mri — Configuration
+# ============================================================
+
+data:
+  raw_dir: data/raw/lgg-mri-segmentation
+  processed_dir: data/processed
+  synthetic_dir: data/synthetic
+  image_size: 256
+  seed: 42
+
+model:
+  input_channels: 1       # binary mask (condition)
+  output_channels: 3      # MRI: R/T1, G/FLAIR (most important), B/T2
+  num_filters: 64
+  norm: instance          # instance | batch
+
+training:
+  epochs: 200
+  batch_size: 1
+  lr: 0.0002
+  beta1: 0.5
+  beta2: 0.999
+  lambda_l1: 100
+  save_every: 5           # checkpoint + sample grid frequency
+
+paths:
+  checkpoints: outputs/checkpoints
+  samples: outputs/samples
+  metrics: outputs/metrics

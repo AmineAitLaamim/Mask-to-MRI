@@ -9,13 +9,36 @@ wheels/
 # Virtual environments
 .venv
 
-# Data 
+# Data (keep raw but ignore large files)
 !data/raw/
-data/raw/*
-!data/split/
-data/split/*
-!data/processed/
-data/processed/*
+data/raw/lgg-mri-segmentation/**/
+data/raw/lgg-mri-segmentation/**/*.tif
 
-# .tif
-.tif
+# Processed / synthetic / outputs
+data/processed/*
+data/synthetic/*
+outputs/
+
+# Notebooks personal
+TCGA_CS_4941_19960909/
+
+# .tif files
+*.tif
+
+# .pdf files
+*.pdf
+
+# .txt files
+*.txt
+
+# Qwen settings
+.qwen/
+
+# Data directories (raw data already gitignored above)
+data/raw/lgg-mri-segmentation/
+data/processed/
+data/synthetic/
+data/splits/
+
+# Qwen context file
+QWEN.md
