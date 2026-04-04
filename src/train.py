@@ -33,12 +33,12 @@ class LinearLRDecay:
       - Epochs decay_start..epochs: linearly decay to 0
     """
 
-    def __init__(self, optimizer, lr: float, total_epochs: int, decay_start: int):
+    def __init__(self, optimizer, lr: float, total_epochs: int, decay_start: int, start_epoch: int = 0):
         self.optimizer = optimizer
         self.lr = lr
         self.total_epochs = total_epochs
         self.decay_start = decay_start
-        self.current_epoch = 0
+        self.current_epoch = start_epoch
 
     def step(self):
         self.current_epoch += 1
@@ -126,6 +126,7 @@ def train(
     device: torch.device,
     checkpoint_dir: str = "outputs/checkpoints",
     samples_dir: str = "outputs/samples",
+    resume_from: str | None = None,
 ) -> list[dict]:
     """
     Run the full pix2pix training loop.
@@ -139,6 +140,8 @@ def train(
         device: torch.device
         checkpoint_dir: Directory to save checkpoints
         samples_dir: Directory to save sample grids
+        resume_from: Path to checkpoint file to resume from (optional).
+                     If None, will auto-detect latest checkpoint in checkpoint_dir.
 
     Returns:
         List of per-epoch loss dicts for plotting.
@@ -155,10 +158,21 @@ def train(
     opt_G = optim.Adam(generator.parameters(), lr=lr, betas=(beta1, beta2))
     opt_D = optim.Adam(discriminator.parameters(), lr=lr, betas=(beta1, beta2))
 
+    # Auto-detect latest checkpoint if resume_from not specified
+    if resume_from is None:
+        resume_from = find_latest_checkpoint(checkpoint_dir)
+
+    start_epoch = 0
+    history = []
+    if resume_from and os.path.exists(resume_from):
+        start_epoch = load_checkpoint(resume_from, generator, discriminator, opt_G, opt_D)
+        print(f"  → Resuming from checkpoint: {resume_from} (epoch {start_epoch})")
+        print()
+
     # LR scheduler: constant for first half, linear decay for second half
     decay_start = epochs // 2
-    lr_scheduler_G = LinearLRDecay(opt_G, lr, epochs, decay_start)
-    lr_scheduler_D = LinearLRDecay(opt_D, lr, epochs, decay_start)
+    lr_scheduler_G = LinearLRDecay(opt_G, lr, epochs, decay_start, start_epoch=start_epoch)
+    lr_scheduler_D = LinearLRDecay(opt_D, lr, epochs, decay_start, start_epoch=start_epoch)
 
     # Loss
     gan_criterion = GANLoss(lambda_l1=lambda_l1)
@@ -166,13 +180,13 @@ def train(
     # History
     history = []
 
-    print(f"\nTraining pix2pix for {epochs} epochs")
+    print(f"\nTraining pix2pix: epoch {start_epoch + 1}–{epochs} of {epochs}")
     print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}")
     print(f"  Schedule: {decay_start} epochs constant + {decay_start} epochs linear decay")
     print(f"  Checkpoint every {save_every} epochs")
     print()
 
-    for epoch in range(1, epochs + 1):
+    for epoch in range(start_epoch + 1, epochs + 1):
         # Training phase
         generator.train()
         discriminator.train()
@@ -253,6 +267,25 @@ def _save_checkpoint(
         "opt_D_state_dict": opt_D.state_dict(),
     }, path)
     print(f"  → Saved checkpoint: {path}")
+
+
+def find_latest_checkpoint(checkpoint_dir: str) -> str | None:
+    """
+    Find the latest checkpoint in the checkpoint directory.
+    Returns the path to the checkpoint file, or None if no checkpoints exist.
+    """
+    import glob
+
+    if not os.path.exists(checkpoint_dir):
+        return None
+
+    checkpoints = sorted(glob.glob(os.path.join(checkpoint_dir, "checkpoint_epoch_*.pt")))
+    if not checkpoints:
+        return None
+
+    # Return the one with the highest epoch number
+    latest = max(checkpoints, key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
+    return latest
 
 
 def load_checkpoint(
