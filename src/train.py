@@ -233,15 +233,65 @@ def train(
             f"LR: {epoch_losses['lr']:.6f}"
         )
 
-        # Save checkpoint + sample grid every N epochs
+        # Save checkpoint + sample grid + loss plot every N epochs
         if epoch % save_every == 0 or epoch == epochs:
             _save_checkpoint(generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir)
             _save_sample_grid(
                 generator, val_loader, epoch, samples_dir, device
             )
+            _save_loss_plot(history, os.path.join(samples_dir, "loss_curves.png"))
 
     print("\nTraining complete.")
     return history
+
+
+# ---------------------------------------------------------------------------
+# Live loss plot generation
+# ---------------------------------------------------------------------------
+
+def _save_loss_plot(history: list[dict], save_path: str):
+    """Generate and save a live loss plot from current history."""
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend for saving
+    import matplotlib.pyplot as plt
+
+    if not history:
+        return
+
+    epochs = [h["epoch"] for h in history]
+    loss_D = [h["loss_D"] for h in history]
+    loss_G = [h["loss_G"] for h in history]
+    loss_G_adv = [h["loss_G_adv"] for h in history]
+    loss_G_L1 = [h["loss_G_L1"] for h in history]
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    axes[0].plot(epochs, loss_D, "r-", label="Discriminator")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Loss")
+    axes[0].set_title("Discriminator Loss")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(epochs, loss_G, "b-", label="Generator")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("Loss")
+    axes[1].set_title("Generator Loss")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    axes[2].plot(epochs, loss_G_adv, "g-", label="Adversarial", alpha=0.7)
+    axes[2].plot(epochs, loss_G_L1, "orange", label="L1", alpha=0.7)
+    axes[2].set_xlabel("Epoch")
+    axes[2].set_ylabel("Loss")
+    axes[2].set_title("Generator Components")
+    axes[2].legend()
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=100, bbox_inches="tight")
+    plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
