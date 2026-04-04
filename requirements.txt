@@ -1,0 +1,13 @@
+torch
+torchvision
+albumentations
+opencv-python
+tifffile
+scikit-image
+pytorch-fid
+segmentation-models-pytorch
+pyyaml
+matplotlib
+numpy
+Pillow
+tqdm
