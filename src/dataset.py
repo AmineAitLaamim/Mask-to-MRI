@@ -483,7 +483,7 @@ def build_dataloaders(
             batch_size=batch_size,
             shuffle=augment and not isinstance(dataset, BalancedLGGDataset),
             num_workers=num_workers,
-            pin_memory=False,
+            pin_memory=torch.cuda.is_available(),
             drop_last=False,
         )
         loaders[split_name] = loader

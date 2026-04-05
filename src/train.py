@@ -227,7 +227,7 @@ def train(
     for epoch in range(start_epoch + 1, epochs + 1):
         # Rebuild balanced sampling indices for this epoch
         if hasattr(train_loader.dataset, 'set_epoch'):
-            train_loader.dataset.set_epoch(seed=epoch + start_epoch)
+            train_loader.dataset.set_epoch(seed=epoch)
 
         # Training phase
         generator.train()
