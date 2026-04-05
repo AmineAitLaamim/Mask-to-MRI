@@ -226,6 +226,7 @@ class LGGDataset(Dataset):
 class BalancedLGGDataset(Dataset):
     """
     PyTorch Dataset that samples tumor and background slices at a fixed ratio.
+    Optimized to accept pre-separated lists to avoid slow disk scanning on Colab.
 
     Each item returns:
         mask_tensor:  (1, H, W)  normalized [-1, 1]  — condition input
@@ -234,7 +235,9 @@ class BalancedLGGDataset(Dataset):
 
     def __init__(
         self,
-        pairs: list[tuple[str, str]],
+        pairs: list[tuple[str, str]] | None = None,
+        tumor_pairs: list[tuple[str, str]] | None = None,
+        background_pairs: list[tuple[str, str]] | None = None,
         image_size: int = 256,
         augment: bool = False,
         tumor_ratio: float = 0.75,
@@ -248,15 +251,24 @@ class BalancedLGGDataset(Dataset):
             else get_val_augmentation(image_size)
         )
 
-        # Separate into tumor and background pairs
-        self.tumor_pairs = []
-        self.background_pairs = []
-        for img_path, mask_path in pairs:
-            mask = _load_tif(mask_path)
-            if _has_tumor(mask):
-                self.tumor_pairs.append((img_path, mask_path))
-            else:
-                self.background_pairs.append((img_path, mask_path))
+        # If pre-separated lists are provided, use them (FAST)
+        if tumor_pairs is not None and background_pairs is not None:
+            self.tumor_pairs = tumor_pairs
+            self.background_pairs = background_pairs
+        else:
+            # Fallback: separate them from mixed list (SLOW - scans disk)
+            if pairs is None:
+                raise ValueError("Either 'pairs' or both 'tumor_pairs'/'background_pairs' must be provided")
+            
+            self.tumor_pairs = []
+            self.background_pairs = []
+            print("    Scanning masks to separate tumor/background...")
+            for img_path, mask_path in pairs:
+                mask = _load_tif(mask_path)
+                if _has_tumor(mask):
+                    self.tumor_pairs.append((img_path, mask_path))
+                else:
+                    self.background_pairs.append((img_path, mask_path))
 
         print(f"    Tumor slices:      {len(self.tumor_pairs)}")
         print(f"    Background slices: {len(self.background_pairs)}")

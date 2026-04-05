@@ -96,6 +96,20 @@ def prepare():
             json.dump(data, f)
         print(f"Saved {out_path} with {len(data)} pairs.")
 
+    # 5. Save separated lists for fast BalancedLGGDataset loading
+    def is_tumor(mask_path):
+        return tifffile.imread(str(DATASET_DIR / mask_path)).max() > 0
+
+    print("\nGenerating separated lists for fast loading...")
+    train_tumor = [(img, msk) for img, msk in splits['train'] if is_tumor(msk)]
+    train_bg = [(img, msk) for img, msk in splits['train'] if not is_tumor(msk)]
+    
+    with open(OUTPUT_DIR / 'train_tumor.json', 'w') as f: 
+        json.dump(train_tumor, f)
+    with open(OUTPUT_DIR / 'train_background.json', 'w') as f: 
+        json.dump(train_bg, f)
+    print(f"Saved train_tumor.json ({len(train_tumor)} items) and train_background.json ({len(train_bg)} items).")
+
     print("\nDone! Upload the JSON files in data/splits/ to your Google Drive.")
 
 if __name__ == "__main__":
