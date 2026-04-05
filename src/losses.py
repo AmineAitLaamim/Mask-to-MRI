@@ -70,17 +70,20 @@ class PerceptualLoss(nn.Module):
         Returns:
             L1 loss between VGG feature maps.
         """
-        # VGG19 is moved to GPU once during GANLoss initialization in train.py
+        # Fix #4: Wrap in torch.no_grad() to save memory and time
+        with torch.no_grad():
+            # Denormalize: [-1, 1] → [0, 1]
+            fake_denorm = (fake + 1.0) / 2.0
+            real_denorm = (real + 1.0) / 2.0
+            # ImageNet normalization (buffers are already on correct device)
+            fake_norm = (fake_denorm - self.mean) / self.std
+            real_norm = (real_denorm - self.mean) / self.std
 
-        # Denormalize: [-1, 1] → [0, 1]
-        fake_denorm = (fake + 1.0) / 2.0
-        real_denorm = (real + 1.0) / 2.0
-        # ImageNet normalization (buffers are already on correct device)
-        fake_norm = (fake_denorm - self.mean) / self.std
-        real_norm = (real_denorm - self.mean) / self.std
+            # Fix #6: Single-pass VGG — concatenate and chunk for efficiency
+            x = torch.cat([fake_norm, real_norm], dim=0)
+            feats = self.features(x)
+            fake_feats, real_feats = feats.chunk(2, dim=0)
 
-        fake_feats = self.features(fake_norm)
-        real_feats = self.features(real_norm)
         return F.l1_loss(fake_feats, real_feats)
 
 
