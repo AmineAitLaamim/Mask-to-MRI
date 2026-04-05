@@ -99,9 +99,9 @@ def _train_one_batch(
     # ----- Step 3: Train Generator -----
     opt_G.zero_grad()
 
-    # Re-use d_fake_pred (or recompute without detach)
+    # Recompute discriminator forward pass for generator's adversarial loss
     d_fake_pred_g = discriminator(mask_batch, fake_mri)
-    loss_G, loss_G_adv, loss_G_L1 = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
+    loss_G, loss_G_adv, loss_G_L1, loss_perceptual = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
     loss_G.backward()
     opt_G.step()
 
