@@ -84,14 +84,14 @@ def _train_one_batch(
     real_mri = real_mri.to(device)
 
     # ----- Step 1: Generate fake MRI -----
-    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type != "cpu"):
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
         fake_mri = generator(mask_batch)
 
     # ----- Step 2: Train Discriminator (every 2 steps) -----
     # Skip training D on odd steps to prevent it from dominating
     if step % 2 == 0:
         opt_D.zero_grad()
-        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type != "cpu"):
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
             d_real_pred = discriminator(mask_batch, real_mri)
             loss_D_real = discriminator_loss_real(d_real_pred)
             d_fake_pred = discriminator(mask_batch, fake_mri.detach())
@@ -112,7 +112,7 @@ def _train_one_batch(
     opt_G.zero_grad()
 
     # Recompute discriminator forward pass for generator's adversarial loss
-    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type != "cpu"):
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
         d_fake_pred_g = discriminator(mask_batch, fake_mri)
         loss_G, loss_G_adv, loss_G_L1, loss_perceptual = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
 
