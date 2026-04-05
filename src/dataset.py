@@ -320,9 +320,9 @@ class BalancedLGGDataset(Dataset):
         if tumor_pairs is not None and background_pairs is not None:
             self.tumor_pairs = tumor_pairs
             self.background_pairs = background_pairs
-            if cache:
-                self.cached_tumor_raw = []
-                self.cached_bg_raw = []
+            # Always initialize cache lists (even if cache=False, for safe attribute access)
+            self.cached_tumor_raw = []
+            self.cached_bg_raw = []
         else:
             # Fallback: separate them from mixed list (SLOW - scans disk)
             if pairs is None:
@@ -331,9 +331,9 @@ class BalancedLGGDataset(Dataset):
             # Fallback: separate and cache in ONE pass
             self.tumor_pairs = []
             self.background_pairs = []
-            if cache:
-                self.cached_tumor_raw = []
-                self.cached_bg_raw = []
+            # Always initialize cache lists for safe attribute access
+            self.cached_tumor_raw = []
+            self.cached_bg_raw = []
 
             print("    Scanning and caching in single pass...")
             for img_path, mask_path in pairs:
