@@ -70,16 +70,18 @@ class PerceptualLoss(nn.Module):
         Returns:
             L1 loss between VGG feature maps.
         """
-        # Move VGG to the same device as input
-        if self.features.device != fake.device:
-            self.features = self.features.to(fake.device)
+        device = fake.device
+        # Ensure VGG is on the correct device
+        self.features = self.features.to(device)
+        mean = self.mean.to(device)
+        std = self.std.to(device)
 
         # Denormalize: [-1, 1] → [0, 1]
         fake_denorm = (fake + 1.0) / 2.0
         real_denorm = (real + 1.0) / 2.0
         # ImageNet normalization
-        fake_norm = (fake_denorm - self.mean.to(fake.device)) / self.std.to(fake.device)
-        real_norm = (real_denorm - self.mean.to(fake.device)) / self.std.to(fake.device)
+        fake_norm = (fake_denorm - mean) / std
+        real_norm = (real_denorm - mean) / std
 
         fake_feats = self.features(fake_norm)
         real_feats = self.features(real_norm)
@@ -130,14 +132,12 @@ class GANLoss(nn.Module):
             loss_G_L1: L1 pixel component
             loss_perceptual: perceptual (VGG feature) component
         """
-        # Ensure perceptual loss is on the same device as inputs
-        if self.use_perceptual and self.perceptual is not None and self.perceptual.features.device != fake.device:
-            self.perceptual = self.perceptual.to(fake.device)
-
         loss_G_adv = generator_adversarial_loss(d_pred_fake)
         loss_G_L1 = self.l1(fake, real)
 
         if self.use_perceptual and self.perceptual is not None:
+            # Move perceptual loss to the device of the input tensor
+            self.perceptual = self.perceptual.to(fake.device)
             loss_perceptual = self.perceptual(fake, real)
         else:
             loss_perceptual = torch.tensor(0.0, device=fake.device)
