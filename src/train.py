@@ -179,7 +179,7 @@ def train(
     lr_scheduler_D = LinearLRDecay(opt_D, lr, epochs, decay_start, start_epoch=start_epoch)
 
     # Loss
-    gan_criterion = GANLoss(lambda_l1=lambda_l1)
+    gan_criterion = GANLoss(lambda_l1=lambda_l1).to(device)
 
     # History
     history = []
