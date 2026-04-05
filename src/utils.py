@@ -155,7 +155,7 @@ def make_sample_grid(
 
 def plot_loss_curves(history: list[dict], save_path: str | None = None):
     """
-    Plot training loss curves (D, G, G_adv, G_L1) over epochs.
+    Plot training loss curves (D, G, G_adv, G_L1, Perceptual) over epochs.
 
     Args:
         history: List of per-epoch loss dicts from train()
@@ -168,6 +168,7 @@ def plot_loss_curves(history: list[dict], save_path: str | None = None):
     loss_G = [h["loss_G"] for h in history]
     loss_G_adv = [h["loss_G_adv"] for h in history]
     loss_G_L1 = [h["loss_G_L1"] for h in history]
+    loss_perc = [h["loss_perceptual"] for h in history]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
@@ -187,6 +188,7 @@ def plot_loss_curves(history: list[dict], save_path: str | None = None):
 
     axes[2].plot(epochs, loss_G_adv, "g-", label="Adversarial", alpha=0.7)
     axes[2].plot(epochs, loss_G_L1, "orange", label="L1", alpha=0.7)
+    axes[2].plot(epochs, loss_perc, "purple", label="Perceptual", alpha=0.7)
     axes[2].set_xlabel("Epoch")
     axes[2].set_ylabel("Loss")
     axes[2].set_title("Generator Components")
@@ -200,4 +202,53 @@ def plot_loss_curves(history: list[dict], save_path: str | None = None):
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"  → Saved loss curves: {save_path}")
 
+    plt.show()
+
+
+def plot_metrics_from_file(path: str):
+    """
+    Load metrics from a saved JSON file and plot the loss curves.
+
+    Args:
+        path: Path to the metrics JSON file (e.g., outputs/samples/metrics.json)
+    """
+    import json
+    import matplotlib.pyplot as plt
+
+    with open(path, 'r') as f:
+        history = json.load(f)
+
+    epochs = [h["epoch"] for h in history]
+    loss_D = [h["loss_D"] for h in history]
+    loss_G = [h["loss_G"] for h in history]
+    loss_G_adv = [h["loss_G_adv"] for h in history]
+    loss_G_L1 = [h["loss_G_L1"] for h in history]
+    loss_perc = [h["loss_perceptual"] for h in history]
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+
+    axes[0].plot(epochs, loss_D, "r-", label="Discriminator")
+    axes[0].set_xlabel("Epoch")
+    axes[0].set_ylabel("Loss")
+    axes[0].set_title("Discriminator Loss")
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    axes[1].plot(epochs, loss_G, "b-", label="Generator")
+    axes[1].set_xlabel("Epoch")
+    axes[1].set_ylabel("Loss")
+    axes[1].set_title("Generator Loss")
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    axes[2].plot(epochs, loss_G_adv, "g-", label="Adversarial", alpha=0.7)
+    axes[2].plot(epochs, loss_G_L1, "orange", label="L1", alpha=0.7)
+    axes[2].plot(epochs, loss_perc, "purple", label="Perceptual", alpha=0.7)
+    axes[2].set_xlabel("Epoch")
+    axes[2].set_ylabel("Loss")
+    axes[2].set_title("Generator Components")
+    axes[2].legend()
+    axes[2].grid(True, alpha=0.3)
+
+    plt.tight_layout()
     plt.show()

@@ -8,6 +8,8 @@ data:
   synthetic_dir: data/synthetic
   image_size: 256
   seed: 42
+  balanced: true
+  tumor_ratio: 0.75
 
 model:
   input_channels: 1       # binary mask (condition)
@@ -21,7 +23,7 @@ training:
   lr: 0.0002
   beta1: 0.5
   beta2: 0.999
-  lambda_l1: 100
+  lambda_l1: 10           # Reduced from 100 — adversarial signal needs weight
   save_every: 5           # checkpoint + sample grid frequency
 
 paths:

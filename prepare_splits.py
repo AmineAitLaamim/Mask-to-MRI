@@ -22,34 +22,38 @@ def prepare():
         return
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"Scanning dataset at {DATASET_DIR}...")
-    
-    # 1. Collect all valid (tumor) pairs
-    all_pairs = []
+
+    # 1. Collect ALL pairs (tumor + background) and tumor-only pairs
+    all_pairs = []         # All slices (tumor + background)
+    tumor_pairs = []       # Tumor slices only
     patients = []
-    
+
     for patient_folder in sorted(DATASET_DIR.iterdir()):
         if not patient_folder.is_dir():
             continue
-            
-        patients.append(patient_folder.name)
-        valid_count = 0
-        
-        for mask_file in sorted(patient_folder.glob("*_mask.tif")):
-            # Fast check: does this mask have tumor?
-            mask = tifffile.imread(str(mask_file))
-            if mask.max() > 0:
-                # Store relative path to ensure it works on Colab
-                # e.g., "TCGA_CS_4941_19960909/mask.tif"
-                rel_mask = mask_file.relative_to(DATASET_DIR).as_posix()
-                rel_img = str(rel_mask).replace("_mask.tif", ".tif")
-                all_pairs.append((rel_img, rel_mask))
-                valid_count += 1
-        
-        print(f"  {patient_folder.name}: {valid_count} tumor slices")
 
-    print(f"\nTotal tumor slices found: {len(all_pairs)}")
+        patients.append(patient_folder.name)
+        tumor_count = 0
+        total_count = 0
+
+        for mask_file in sorted(patient_folder.glob("*_mask.tif")):
+            total_count += 1
+            mask = tifffile.imread(str(mask_file))
+            rel_mask = mask_file.relative_to(DATASET_DIR).as_posix()
+            rel_img = str(rel_mask).replace("_mask.tif", ".tif")
+            all_pairs.append((rel_img, rel_mask))
+            
+            if mask.max() > 0:
+                tumor_pairs.append((rel_img, rel_mask))
+                tumor_count += 1
+
+        print(f"  {patient_folder.name}: {tumor_count}/{total_count} tumor slices")
+
+    print(f"\nTotal slices: {len(all_pairs)}")
+    print(f"Tumor slices: {len(tumor_pairs)}")
+    print(f"Background slices: {len(all_pairs) - len(tumor_pairs)}")
     print(f"Total patients: {len(patients)}")
 
     # 2. Patient-level split
@@ -67,15 +71,22 @@ def prepare():
     print(f"Split: {len(train_patients)} Train, {len(val_patients)} Val, {len(test_patients)} Test")
 
     # 3. Distribute pairs into splits
+    # Train gets ALL slices (tumor + background) so GAN learns full brain anatomy
+    # Val/Test get only tumor slices for consistent evaluation
     splits = {'train': [], 'val': [], 'test': []}
-    
+
+    # Train: all slices from train patients
     for img, mask in all_pairs:
-        patient_name = Path(img).parts[0] # e.g., "TCGA_CS_4941_19960909"
+        patient_name = Path(img).parts[0]
         if patient_name in train_patients:
             splits['train'].append((img, mask))
-        elif patient_name in val_patients:
+
+    # Val/Test: tumor slices only
+    for img, mask in tumor_pairs:
+        patient_name = Path(img).parts[0]
+        if patient_name in val_patients:
             splits['val'].append((img, mask))
-        else:
+        elif patient_name in test_patients:
             splits['test'].append((img, mask))
 
     # 4. Save JSON files
@@ -84,7 +95,7 @@ def prepare():
         with open(out_path, 'w') as f:
             json.dump(data, f)
         print(f"Saved {out_path} with {len(data)} pairs.")
-        
+
     print("\nDone! Upload the JSON files in data/splits/ to your Google Drive.")
 
 if __name__ == "__main__":

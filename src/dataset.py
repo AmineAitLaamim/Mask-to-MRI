@@ -114,22 +114,21 @@ def patient_level_split(
 # ---------------------------------------------------------------------------
 
 def get_train_augmentation(image_size: int = 256):
-    """Albumentations augmentation for training data."""
+    """Albumentations augmentation for training data.
+
+    Uses random jitter (resize + crop) as in the original pix2pix paper.
+    """
+    jitter_size = 286
     return A.Compose(
         [
-            A.Resize(image_size, image_size),
+            A.Resize(jitter_size, jitter_size),
+            A.RandomCrop(image_size, image_size),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.3),
             A.RandomRotate90(p=0.5),
-            A.ShiftScaleRotate(
-                shift_limit=0.05,
-                scale_limit=0.1,
-                rotate_limit=15,
-                p=0.5,
-            ),
             A.OneOf(
                 [
-                    A.GaussNoise(p=1.0),
+                    A.GaussNoise(var_limit=(10.0, 50.0), p=1.0),
                     A.Blur(blur_limit=3, p=1.0),
                 ],
                 p=0.2,
@@ -221,6 +220,84 @@ class LGGDataset(Dataset):
 
 
 # ---------------------------------------------------------------------------
+# Balanced Dataset — samples tumor vs background at a fixed ratio
+# ---------------------------------------------------------------------------
+
+class BalancedLGGDataset(Dataset):
+    """
+    PyTorch Dataset that samples tumor and background slices at a fixed ratio.
+
+    Each item returns:
+        mask_tensor:  (1, H, W)  normalized [-1, 1]  — condition input
+        image_tensor: (3, H, W)  normalized [-1, 1]  — target MRI (R, G/FLAIR, B)
+    """
+
+    def __init__(
+        self,
+        pairs: list[tuple[str, str]],
+        image_size: int = 256,
+        augment: bool = False,
+        tumor_ratio: float = 0.75,
+    ):
+        self.tumor_ratio = tumor_ratio
+        self.image_size = image_size
+        self.augment = augment
+        self.transform = (
+            get_train_augmentation(image_size)
+            if augment
+            else get_val_augmentation(image_size)
+        )
+
+        # Separate into tumor and background pairs
+        self.tumor_pairs = []
+        self.background_pairs = []
+        for img_path, mask_path in pairs:
+            mask = _load_tif(mask_path)
+            if _has_tumor(mask):
+                self.tumor_pairs.append((img_path, mask_path))
+            else:
+                self.background_pairs.append((img_path, mask_path))
+
+        print(f"    Tumor slices:      {len(self.tumor_pairs)}")
+        print(f"    Background slices: {len(self.background_pairs)}")
+        print(f"    Tumor ratio:       {tumor_ratio}")
+
+    def __len__(self) -> int:
+        return int(len(self.tumor_pairs) / self.tumor_ratio)
+
+    def __getitem__(self, idx: int):
+        # Sample based on tumor_ratio
+        r = random.random()
+        if r < self.tumor_ratio:
+            img_path, mask_path = random.choice(self.tumor_pairs)
+        else:
+            img_path, mask_path = random.choice(self.background_pairs)
+
+        # Load raw data
+        image = _load_tif(img_path)   # (H, W, 3) — different MRI sequences
+        mask = _load_tif(mask_path)   # (H, W) or (H, W, 1)
+
+        # Ensure mask is 2D and binary
+        mask = np.squeeze(mask)
+        mask = (mask > 0).astype(np.uint8) * 255
+
+        # Apply augmentations
+        transformed = self.transform(image=image, mask=mask)
+        image_aug = transformed["image"]      # (H, W, 3)
+        mask_aug = transformed["mask"]        # (H, W)
+
+        # Normalize to [-1, 1]
+        image_norm = _normalize(image_aug)    # (H, W, 3), float32
+        mask_norm = _normalize(mask_aug.astype(np.float32))  # (H, W), float32
+
+        # Convert to tensors: mask (1, H, W), image (3, H, W)
+        mask_tensor = torch.from_numpy(mask_norm).unsqueeze(0)       # (1, H, W)
+        image_tensor = torch.from_numpy(image_norm).permute(2, 0, 1)  # (3, H, W)
+
+        return mask_tensor, image_tensor
+
+
+# ---------------------------------------------------------------------------
 # Convenience: build DataLoaders from raw dir
 # ---------------------------------------------------------------------------
 
@@ -230,7 +307,8 @@ def build_dataloaders(
     batch_size: int = 1,
     num_workers: int = 0,
     seed: int = 42,
-    filter_empty_masks: bool = True,
+    balanced: bool = True,
+    tumor_ratio: float = 0.75,
 ):
     """
     Create train/val/test DataLoaders with patient-level splitting.
@@ -243,14 +321,22 @@ def build_dataloaders(
     loaders = {}
     for split_name, pairs in splits.items():
         augment = split_name == "train"
-        dataset = LGGDataset(
-            pairs,
-            image_size=image_size,
-            augment=augment,
-            seed=seed,
-            filter_empty_masks=filter_empty_masks,
-        )
-        print(f"  {split_name}: {len(dataset)} samples after filtering")
+        if split_name == "train" and balanced:
+            dataset = BalancedLGGDataset(
+                pairs,
+                image_size=image_size,
+                augment=augment,
+                tumor_ratio=tumor_ratio,
+            )
+        else:
+            dataset = LGGDataset(
+                pairs,
+                image_size=image_size,
+                augment=augment,
+                seed=seed,
+                filter_empty_masks=False,
+            )
+        print(f"  {split_name}: {len(dataset)} slices")
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,

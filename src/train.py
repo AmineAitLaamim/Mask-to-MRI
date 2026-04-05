@@ -11,6 +11,8 @@ Implements the step-by-step procedure from the specification:
 
 import os
 from pathlib import Path
+import json
+from datetime import datetime
 
 import torch
 import torch.optim as optim
@@ -69,6 +71,7 @@ def _train_one_batch(
     opt_D: optim.Optimizer,
     gan_criterion: GANLoss,
     device: torch.device,
+    step: int = 0,
 ) -> dict[str, float]:
     """
     Perform one training step (one batch) for both D and G.
@@ -81,27 +84,26 @@ def _train_one_batch(
     # ----- Step 1: Generate fake MRI -----
     fake_mri = generator(mask_batch)
 
-    # ----- Step 2: Train Discriminator -----
-    opt_D.zero_grad()
-
-    # Real pair
-    d_real_pred = discriminator(mask_batch, real_mri)
-    loss_D_real = discriminator_loss_real(d_real_pred)
-
-    # Fake pair (detach generator output)
-    d_fake_pred = discriminator(mask_batch, fake_mri.detach())
-    loss_D_fake = discriminator_loss_fake(d_fake_pred)
-
-    loss_D = (loss_D_real + loss_D_fake) * 0.5
-    loss_D.backward()
-    opt_D.step()
+    # ----- Step 2: Train Discriminator (every 2 steps) -----
+    # Skip training D on odd steps to prevent it from dominating
+    if step % 2 == 0:
+        opt_D.zero_grad()
+        d_real_pred = discriminator(mask_batch, real_mri)
+        loss_D_real = discriminator_loss_real(d_real_pred)
+        d_fake_pred = discriminator(mask_batch, fake_mri.detach())
+        loss_D_fake = discriminator_loss_fake(d_fake_pred)
+        loss_D = (loss_D_real + loss_D_fake) * 0.5
+        loss_D.backward()
+        opt_D.step()
+    else:
+        loss_D = torch.tensor(0.0, device=device)  # Placeholder
 
     # ----- Step 3: Train Generator -----
     opt_G.zero_grad()
 
-    # Re-use d_fake_pred (or recompute without detach)
+    # Recompute discriminator forward pass for generator's adversarial loss
     d_fake_pred_g = discriminator(mask_batch, fake_mri)
-    loss_G, loss_G_adv, loss_G_L1 = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
+    loss_G, loss_G_adv, loss_G_L1, loss_perceptual = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
     loss_G.backward()
     opt_G.step()
 
@@ -110,6 +112,7 @@ def _train_one_batch(
         "loss_G": loss_G.item(),
         "loss_G_adv": loss_G_adv.item(),
         "loss_G_L1": loss_G_L1.item(),
+        "loss_perceptual": loss_perceptual.item(),
     }
 
 
@@ -126,6 +129,7 @@ def train(
     device: torch.device,
     checkpoint_dir: str = "outputs/checkpoints",
     samples_dir: str = "outputs/samples",
+    metrics_dir: str = "outputs/metrics",
     resume_from: str | None = None,
 ) -> list[dict]:
     """
@@ -184,6 +188,7 @@ def train(
     print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}")
     print(f"  Schedule: {decay_start} epochs constant + {decay_start} epochs linear decay")
     print(f"  Checkpoint every {save_every} epochs")
+    print(f"  Metrics dir: {metrics_dir}")
     print()
 
     for epoch in range(start_epoch + 1, epochs + 1):
@@ -191,16 +196,19 @@ def train(
         generator.train()
         discriminator.train()
 
-        epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0}
+        epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0, "loss_perceptual": 0.0}
         n_batches = 0
 
+        # Global step counter (persistent across epochs) for consistent D skip pattern
+        global_step = start_epoch * len(train_loader)
+
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
-        for mask_batch, real_mri in pbar:
+        for step, (mask_batch, real_mri) in enumerate(pbar):
             losses = _train_one_batch(
                 mask_batch, real_mri,
                 generator, discriminator,
                 opt_G, opt_D,
-                gan_criterion, device,
+                gan_criterion, device, step=global_step + step
             )
             for k, v in losses.items():
                 epoch_losses[k] += v
@@ -222,6 +230,7 @@ def train(
         epoch_losses["epoch"] = epoch
 
         history.append(epoch_losses)
+        global_step += n_batches
 
         # Logging
         print(
@@ -230,16 +239,18 @@ def train(
             f"G: {epoch_losses['loss_G']:.4f} | "
             f"G_adv: {epoch_losses['loss_G_adv']:.4f} | "
             f"G_L1: {epoch_losses['loss_G_L1']:.4f} | "
+            f"G_perc: {epoch_losses['loss_perceptual']:.4f} | "
             f"LR: {epoch_losses['lr']:.6f}"
         )
 
-        # Save checkpoint + sample grid + loss plot every N epochs
+        # Save checkpoint + sample grid + loss plot + metrics every N epochs
         if epoch % save_every == 0 or epoch == epochs:
             _save_checkpoint(generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir)
             _save_sample_grid(
                 generator, val_loader, epoch, samples_dir, device
             )
             _save_loss_plot(history, os.path.join(samples_dir, "loss_curves.png"))
+            _save_metrics(history, os.path.join(metrics_dir, "training_history.json"))
 
     print("\nTraining complete.")
     return history
@@ -263,6 +274,7 @@ def _save_loss_plot(history: list[dict], save_path: str):
     loss_G = [h["loss_G"] for h in history]
     loss_G_adv = [h["loss_G_adv"] for h in history]
     loss_G_L1 = [h["loss_G_L1"] for h in history]
+    loss_perc = [h["loss_perceptual"] for h in history]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
@@ -282,6 +294,7 @@ def _save_loss_plot(history: list[dict], save_path: str):
 
     axes[2].plot(epochs, loss_G_adv, "g-", label="Adversarial", alpha=0.7)
     axes[2].plot(epochs, loss_G_L1, "orange", label="L1", alpha=0.7)
+    axes[2].plot(epochs, loss_perc, "purple", label="Perceptual", alpha=0.7)
     axes[2].set_xlabel("Epoch")
     axes[2].set_ylabel("Loss")
     axes[2].set_title("Generator Components")
@@ -292,6 +305,27 @@ def _save_loss_plot(history: list[dict], save_path: str):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=100, bbox_inches="tight")
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Metrics saving
+# ---------------------------------------------------------------------------
+
+def _save_metrics(history: list[dict], save_path: str):
+    """Save training history to a JSON file for persistence."""
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    # Convert all values to float for JSON serialization
+    serializable = []
+    for h in history:
+        serializable.append({k: float(v) for k, v in h.items()})
+    with open(save_path, 'w') as f:
+        json.dump(serializable, f, indent=2)
+
+
+def load_metrics(path: str) -> list[dict]:
+    """Load training metrics from a JSON file."""
+    with open(path, 'r') as f:
+        return json.load(f)
 
 
 # ---------------------------------------------------------------------------
