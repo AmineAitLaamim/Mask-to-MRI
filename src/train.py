@@ -69,6 +69,7 @@ def _train_one_batch(
     opt_D: optim.Optimizer,
     gan_criterion: GANLoss,
     device: torch.device,
+    step: int = 0,
 ) -> dict[str, float]:
     """
     Perform one training step (one batch) for both D and G.
@@ -81,20 +82,19 @@ def _train_one_batch(
     # ----- Step 1: Generate fake MRI -----
     fake_mri = generator(mask_batch)
 
-    # ----- Step 2: Train Discriminator -----
-    opt_D.zero_grad()
-
-    # Real pair
-    d_real_pred = discriminator(mask_batch, real_mri)
-    loss_D_real = discriminator_loss_real(d_real_pred)
-
-    # Fake pair (detach generator output)
-    d_fake_pred = discriminator(mask_batch, fake_mri.detach())
-    loss_D_fake = discriminator_loss_fake(d_fake_pred)
-
-    loss_D = (loss_D_real + loss_D_fake) * 0.5
-    loss_D.backward()
-    opt_D.step()
+    # ----- Step 2: Train Discriminator (every 2 steps) -----
+    # Skip training D on odd steps to prevent it from dominating
+    if step % 2 == 0:
+        opt_D.zero_grad()
+        d_real_pred = discriminator(mask_batch, real_mri)
+        loss_D_real = discriminator_loss_real(d_real_pred)
+        d_fake_pred = discriminator(mask_batch, fake_mri.detach())
+        loss_D_fake = discriminator_loss_fake(d_fake_pred)
+        loss_D = (loss_D_real + loss_D_fake) * 0.5
+        loss_D.backward()
+        opt_D.step()
+    else:
+        loss_D = torch.tensor(0.0, device=device)  # Placeholder
 
     # ----- Step 3: Train Generator -----
     opt_G.zero_grad()
@@ -195,12 +195,12 @@ def train(
         n_batches = 0
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
-        for mask_batch, real_mri in pbar:
+        for step, (mask_batch, real_mri) in enumerate(pbar):
             losses = _train_one_batch(
                 mask_batch, real_mri,
                 generator, discriminator,
                 opt_G, opt_D,
-                gan_criterion, device,
+                gan_criterion, device, step=step
             )
             for k, v in losses.items():
                 epoch_losses[k] += v

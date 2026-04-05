@@ -21,7 +21,7 @@ training:
   lr: 0.0002
   beta1: 0.5
   beta2: 0.999
-  lambda_l1: 100
+  lambda_l1: 10           # Reduced from 100 to sharpen output
   save_every: 5           # checkpoint + sample grid frequency
 
 paths:
