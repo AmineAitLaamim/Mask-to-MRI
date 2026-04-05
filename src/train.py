@@ -129,6 +129,7 @@ def train(
     device: torch.device,
     checkpoint_dir: str = "outputs/checkpoints",
     samples_dir: str = "outputs/samples",
+    metrics_dir: str = "outputs/metrics",
     resume_from: str | None = None,
 ) -> list[dict]:
     """
@@ -187,6 +188,7 @@ def train(
     print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}")
     print(f"  Schedule: {decay_start} epochs constant + {decay_start} epochs linear decay")
     print(f"  Checkpoint every {save_every} epochs")
+    print(f"  Metrics dir: {metrics_dir}")
     print()
 
     for epoch in range(start_epoch + 1, epochs + 1):
@@ -248,7 +250,7 @@ def train(
                 generator, val_loader, epoch, samples_dir, device
             )
             _save_loss_plot(history, os.path.join(samples_dir, "loss_curves.png"))
-            _save_metrics(history, os.path.join(samples_dir, "metrics.json"))
+            _save_metrics(history, os.path.join(metrics_dir, "training_history.json"))
 
     print("\nTraining complete.")
     return history
