@@ -70,12 +70,16 @@ class PerceptualLoss(nn.Module):
         Returns:
             L1 loss between VGG feature maps.
         """
+        # Move VGG to the same device as input
+        if self.features.device != fake.device:
+            self.features = self.features.to(fake.device)
+
         # Denormalize: [-1, 1] → [0, 1]
         fake_denorm = (fake + 1.0) / 2.0
         real_denorm = (real + 1.0) / 2.0
         # ImageNet normalization
-        fake_norm = (fake_denorm - self.mean) / self.std
-        real_norm = (real_denorm - self.mean) / self.std
+        fake_norm = (fake_denorm - self.mean.to(fake.device)) / self.std.to(fake.device)
+        real_norm = (real_denorm - self.mean.to(fake.device)) / self.std.to(fake.device)
 
         fake_feats = self.features(fake_norm)
         real_feats = self.features(real_norm)
@@ -126,6 +130,10 @@ class GANLoss(nn.Module):
             loss_G_L1: L1 pixel component
             loss_perceptual: perceptual (VGG feature) component
         """
+        # Ensure perceptual loss is on the same device as inputs
+        if self.use_perceptual and self.perceptual is not None and self.perceptual.features.device != fake.device:
+            self.perceptual = self.perceptual.to(fake.device)
+
         loss_G_adv = generator_adversarial_loss(d_pred_fake)
         loss_G_L1 = self.l1(fake, real)
 
