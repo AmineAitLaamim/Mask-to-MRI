@@ -7,6 +7,7 @@ Each .tif image has 3 channels representing different MRI sequences
 
 import os
 import random
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import albumentations as A
@@ -195,9 +196,12 @@ class LGGDataset(Dataset):
         # Cache RAW data in RAM if enabled
         self.cached_raw_data = []
         if cache:
-            print("    Caching raw images in RAM (fast mode)...")
-            for img_path, mask_path in self.pairs:
-                self.cached_raw_data.append((_load_tif(img_path), _load_tif(mask_path)))
+            def _load_pair(p):
+                return (_load_tif(p[0]), _load_tif(p[1]))
+
+            print("    Caching raw images in RAM (Parallel Mode)...")
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                self.cached_raw_data = list(executor.map(_load_pair, self.pairs))
             print(f"    Cached {len(self.cached_raw_data)} pairs.")
 
     def __len__(self) -> int:
@@ -362,13 +366,13 @@ class BalancedLGGDataset(Dataset):
 
         # Cache RAW data in RAM if enabled (for pre-separated path only)
         if cache and tumor_pairs is not None and background_pairs is not None and not self.cached_tumor_raw:
-            print("    Caching raw images in RAM (fast mode)...")
-            self.cached_tumor_raw = []
-            self.cached_bg_raw = []
-            for img_path, mask_path in self.tumor_pairs:
-                self.cached_tumor_raw.append((_load_tif(img_path), _load_tif(mask_path)))
-            for img_path, mask_path in self.background_pairs:
-                self.cached_bg_raw.append((_load_tif(img_path), _load_tif(mask_path)))
+            def _load_pair(p):
+                return (_load_tif(p[0]), _load_tif(p[1]))
+
+            print("    Caching raw images in RAM (Parallel Mode)...")
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                self.cached_tumor_raw = list(executor.map(_load_pair, self.tumor_pairs))
+                self.cached_bg_raw = list(executor.map(_load_pair, self.background_pairs))
             print(f"    Cached {len(self.cached_tumor_raw)} tumor + {len(self.cached_bg_raw)} bg pairs.")
 
     def set_epoch(self, seed: int | None = None):
