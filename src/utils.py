@@ -155,7 +155,7 @@ def make_sample_grid(
 
 def plot_loss_curves(history: list[dict], save_path: str | None = None):
     """
-    Plot training loss curves (D, G, G_adv, G_L1) over epochs.
+    Plot training loss curves (D, G, G_adv, G_L1, Perceptual) over epochs.
 
     Args:
         history: List of per-epoch loss dicts from train()
@@ -168,6 +168,7 @@ def plot_loss_curves(history: list[dict], save_path: str | None = None):
     loss_G = [h["loss_G"] for h in history]
     loss_G_adv = [h["loss_G_adv"] for h in history]
     loss_G_L1 = [h["loss_G_L1"] for h in history]
+    loss_perc = [h["loss_perceptual"] for h in history]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
@@ -187,6 +188,7 @@ def plot_loss_curves(history: list[dict], save_path: str | None = None):
 
     axes[2].plot(epochs, loss_G_adv, "g-", label="Adversarial", alpha=0.7)
     axes[2].plot(epochs, loss_G_L1, "orange", label="L1", alpha=0.7)
+    axes[2].plot(epochs, loss_perc, "purple", label="Perceptual", alpha=0.7)
     axes[2].set_xlabel("Epoch")
     axes[2].set_ylabel("Loss")
     axes[2].set_title("Generator Components")
