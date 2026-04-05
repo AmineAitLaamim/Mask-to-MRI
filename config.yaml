@@ -8,6 +8,8 @@ data:
   synthetic_dir: data/synthetic
   image_size: 256
   seed: 42
+  balanced: true
+  tumor_ratio: 0.75
 
 model:
   input_channels: 1       # binary mask (condition)
