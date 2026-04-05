@@ -27,17 +27,23 @@ def load_config(path: str = "config.yaml") -> dict:
 # Seed fixing for reproducibility
 # ---------------------------------------------------------------------------
 
-def fix_seed(seed: int = 42):
-    """Fix all random seeds for full reproducibility."""
+def fix_seed(seed: int = 42, benchmark: bool = True):
+    """Fix all random seeds for full reproducibility.
+
+    Args:
+        seed: Random seed value.
+        benchmark: If True, enable cudnn.benchmark for faster convolutions
+                   with fixed input sizes. Set False for strict reproducibility.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = not benchmark
+        torch.backends.cudnn.benchmark = benchmark
 
-    print(f"  → Random seed fixed: {seed}")
+    print(f"  → Random seed fixed: {seed} (cudnn.benchmark={benchmark})")
 
 
 # ---------------------------------------------------------------------------
