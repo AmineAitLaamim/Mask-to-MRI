@@ -130,6 +130,7 @@ def _train_one_batch(
         "loss_G_adv": loss_G_adv.item(),
         "loss_G_L1": loss_G_L1.item(),
         "loss_perceptual": loss_perceptual.item(),
+        "loss_D_count": 1 if step % 2 == 0 else 0,
     }
 
 
@@ -195,7 +196,10 @@ def train(
     start_epoch = 0
     history = []
     if resume_from and os.path.exists(resume_from):
-        start_epoch = load_checkpoint(resume_from, generator, discriminator, opt_G, opt_D)
+        start_epoch = load_checkpoint(
+            resume_from, generator, discriminator, opt_G, opt_D, 
+            scaler_D=scaler_D, scaler_G=scaler_G
+        )
         print(f"  → Resuming from checkpoint: {resume_from} (epoch {start_epoch})")
         print()
 
@@ -224,6 +228,7 @@ def train(
 
         epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0, "loss_perceptual": 0.0}
         n_batches = 0
+        n_d_steps = 0  # Count batches where D was actually trained
 
         # Global step counter (persistent across epochs) for consistent D skip pattern
         global_step = start_epoch * len(train_loader)
@@ -238,7 +243,10 @@ def train(
                 scaler_D=scaler_D, scaler_G=scaler_G,
             )
             for k, v in losses.items():
-                epoch_losses[k] += v
+                if k == "loss_D_count":
+                    n_d_steps += v
+                else:
+                    epoch_losses[k] += v
             n_batches += 1
 
             pbar.set_postfix({
@@ -249,6 +257,9 @@ def train(
         # Average losses
         for k in epoch_losses:
             epoch_losses[k] /= n_batches
+        # D loss should be averaged only over steps where D was trained
+        if n_d_steps > 0:
+            epoch_losses["loss_D"] /= n_d_steps
 
         # LR step
         lr_scheduler_G.step()
