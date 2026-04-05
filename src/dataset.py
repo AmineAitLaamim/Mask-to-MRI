@@ -316,6 +316,9 @@ class BalancedLGGDataset(Dataset):
         if tumor_pairs is not None and background_pairs is not None:
             self.tumor_pairs = tumor_pairs
             self.background_pairs = background_pairs
+            if cache:
+                self.cached_tumor_raw = []
+                self.cached_bg_raw = []
         else:
             # Fallback: separate them from mixed list (SLOW - scans disk)
             if pairs is None:
