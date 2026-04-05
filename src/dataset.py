@@ -321,30 +321,25 @@ class BalancedLGGDataset(Dataset):
             if pairs is None:
                 raise ValueError("Either 'pairs' or both 'tumor_pairs'/'background_pairs' must be provided")
 
+            # Fallback: separate and cache in ONE pass
             self.tumor_pairs = []
             self.background_pairs = []
-            print("    Scanning masks to separate tumor/background (single-pass)...")
-            # Fix #7: single-pass separation with simultaneous caching
             if cache:
-                print("    Caching during separation (single-pass)...")
-                for img_path, mask_path in pairs:
-                    img_raw = _load_tif(img_path)
-                    mask_raw = _load_tif(mask_path)
-                    if _has_tumor(mask_raw):
-                        self.tumor_pairs.append((img_path, mask_path))
-                        self.cached_tumor_raw = getattr(self, 'cached_tumor_raw', [])
-                        self.cached_tumor_raw.append((img_raw, mask_raw))
-                    else:
-                        self.background_pairs.append((img_path, mask_path))
-                        self.cached_bg_raw = getattr(self, 'cached_bg_raw', [])
-                        self.cached_bg_raw.append((img_raw, mask_raw))
-            else:
-                for img_path, mask_path in pairs:
-                    mask = _load_tif(mask_path)
-                    if _has_tumor(mask):
-                        self.tumor_pairs.append((img_path, mask_path))
-                    else:
-                        self.background_pairs.append((img_path, mask_path))
+                self.cached_tumor_raw = []
+                self.cached_bg_raw = []
+
+            print("    Scanning and caching in single pass...")
+            for img_path, mask_path in pairs:
+                image = _load_tif(img_path)
+                mask = _load_tif(mask_path)
+                if _has_tumor(mask):
+                    self.tumor_pairs.append((img_path, mask_path))
+                    if cache:
+                        self.cached_tumor_raw.append((image, mask))
+                else:
+                    self.background_pairs.append((img_path, mask_path))
+                    if cache:
+                        self.cached_bg_raw.append((image, mask))
 
         print(f"    Tumor slices:      {len(self.tumor_pairs)}")
         print(f"    Background slices: {len(self.background_pairs)}")
@@ -362,11 +357,11 @@ class BalancedLGGDataset(Dataset):
                 "No background (tumor-free) slices found in the dataset."
             )
 
-        # Cache RAW data in RAM if enabled (for pre-separated path)
-        self.cached_tumor_raw = []
-        self.cached_bg_raw = []
-        if cache and not self.cached_tumor_raw:
+        # Cache RAW data in RAM if enabled (for pre-separated path only)
+        if cache and tumor_pairs is not None and background_pairs is not None and not self.cached_tumor_raw:
             print("    Caching raw images in RAM (fast mode)...")
+            self.cached_tumor_raw = []
+            self.cached_bg_raw = []
             for img_path, mask_path in self.tumor_pairs:
                 self.cached_tumor_raw.append((_load_tif(img_path), _load_tif(mask_path)))
             for img_path, mask_path in self.background_pairs:
@@ -486,7 +481,7 @@ def build_dataloaders(
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=augment,
+            shuffle=augment and not isinstance(dataset, BalancedLGGDataset),
             num_workers=num_workers,
             pin_memory=False,
             drop_last=False,

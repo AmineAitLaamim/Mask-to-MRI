@@ -221,7 +221,14 @@ def train(
     print(f"  Metrics dir: {metrics_dir}")
     print()
 
+    # Global step counter (persistent across epochs) for consistent D skip pattern
+    global_step = start_epoch * len(train_loader)
+
     for epoch in range(start_epoch + 1, epochs + 1):
+        # Rebuild balanced sampling indices for this epoch
+        if hasattr(train_loader.dataset, 'set_epoch'):
+            train_loader.dataset.set_epoch(seed=epoch + start_epoch)
+
         # Training phase
         generator.train()
         discriminator.train()
@@ -229,9 +236,6 @@ def train(
         epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0, "loss_perceptual": 0.0}
         n_batches = 0
         n_d_steps = 0  # Count batches where D was actually trained
-
-        # Global step counter (persistent across epochs) for consistent D skip pattern
-        global_step = start_epoch * len(train_loader)
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
         for step, (mask_batch, real_mri) in enumerate(pbar):
@@ -255,11 +259,13 @@ def train(
             })
 
         # Average losses
-        for k in epoch_losses:
-            epoch_losses[k] /= n_batches
-        # D loss should be averaged only over steps where D was trained
-        if n_d_steps > 0:
-            epoch_losses["loss_D"] /= n_d_steps
+        # Average G losses over all batches
+        epoch_losses["loss_G"] /= n_batches
+        epoch_losses["loss_G_adv"] /= n_batches
+        epoch_losses["loss_G_L1"] /= n_batches
+        epoch_losses["loss_perceptual"] /= n_batches
+        # D loss averaged only over steps where D was trained
+        epoch_losses["loss_D"] /= n_d_steps if n_d_steps > 0 else 1
 
         # LR step
         lr_scheduler_G.step()
