@@ -110,6 +110,7 @@ def _train_one_batch(
         "loss_G": loss_G.item(),
         "loss_G_adv": loss_G_adv.item(),
         "loss_G_L1": loss_G_L1.item(),
+        "loss_perceptual": loss_perceptual.item(),
     }
 
 
@@ -191,8 +192,11 @@ def train(
         generator.train()
         discriminator.train()
 
-        epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0}
+        epoch_losses = {"loss_D": 0.0, "loss_G": 0.0, "loss_G_adv": 0.0, "loss_G_L1": 0.0, "loss_perceptual": 0.0}
         n_batches = 0
+
+        # Global step counter (persistent across epochs) for consistent D skip pattern
+        global_step = start_epoch * len(train_loader)
 
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
         for step, (mask_batch, real_mri) in enumerate(pbar):
@@ -200,7 +204,7 @@ def train(
                 mask_batch, real_mri,
                 generator, discriminator,
                 opt_G, opt_D,
-                gan_criterion, device, step=step
+                gan_criterion, device, step=global_step + step
             )
             for k, v in losses.items():
                 epoch_losses[k] += v
@@ -222,6 +226,7 @@ def train(
         epoch_losses["epoch"] = epoch
 
         history.append(epoch_losses)
+        global_step += n_batches
 
         # Logging
         print(
@@ -230,6 +235,7 @@ def train(
             f"G: {epoch_losses['loss_G']:.4f} | "
             f"G_adv: {epoch_losses['loss_G_adv']:.4f} | "
             f"G_L1: {epoch_losses['loss_G_L1']:.4f} | "
+            f"G_perc: {epoch_losses['loss_perceptual']:.4f} | "
             f"LR: {epoch_losses['lr']:.6f}"
         )
 
@@ -263,6 +269,7 @@ def _save_loss_plot(history: list[dict], save_path: str):
     loss_G = [h["loss_G"] for h in history]
     loss_G_adv = [h["loss_G_adv"] for h in history]
     loss_G_L1 = [h["loss_G_L1"] for h in history]
+    loss_perc = [h["loss_perceptual"] for h in history]
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
 
@@ -282,6 +289,7 @@ def _save_loss_plot(history: list[dict], save_path: str):
 
     axes[2].plot(epochs, loss_G_adv, "g-", label="Adversarial", alpha=0.7)
     axes[2].plot(epochs, loss_G_L1, "orange", label="L1", alpha=0.7)
+    axes[2].plot(epochs, loss_perc, "purple", label="Perceptual", alpha=0.7)
     axes[2].set_xlabel("Epoch")
     axes[2].set_ylabel("Loss")
     axes[2].set_title("Generator Components")

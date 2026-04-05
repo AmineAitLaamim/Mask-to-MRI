@@ -114,22 +114,21 @@ def patient_level_split(
 # ---------------------------------------------------------------------------
 
 def get_train_augmentation(image_size: int = 256):
-    """Albumentations augmentation for training data."""
+    """Albumentations augmentation for training data.
+
+    Uses random jitter (resize + crop) as in the original pix2pix paper.
+    """
+    jitter_size = 286
     return A.Compose(
         [
-            A.Resize(image_size, image_size),
+            A.Resize(jitter_size, jitter_size),
+            A.RandomCrop(image_size, image_size),
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.3),
             A.RandomRotate90(p=0.5),
-            A.ShiftScaleRotate(
-                shift_limit=0.05,
-                scale_limit=0.1,
-                rotate_limit=15,
-                p=0.5,
-            ),
             A.OneOf(
                 [
-                    A.GaussNoise(p=1.0),
+                    A.GaussNoise(var_limit=(10.0, 50.0), p=1.0),
                     A.Blur(blur_limit=3, p=1.0),
                 ],
                 p=0.2,
@@ -230,7 +229,7 @@ def build_dataloaders(
     batch_size: int = 1,
     num_workers: int = 0,
     seed: int = 42,
-    filter_empty_masks: bool = True,
+    filter_empty_masks: bool = False,
 ):
     """
     Create train/val/test DataLoaders with patient-level splitting.

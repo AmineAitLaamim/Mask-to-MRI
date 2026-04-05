@@ -32,35 +32,32 @@ class PatchGANDiscriminator(nn.Module):
     ):
         super().__init__()
 
-        # Layer 1 — no normalization (standard pix2pix)
+        # Layer 1 — no activation after spectral norm, LeakyReLU separate
         self.layer1 = nn.Sequential(
-            nn.Conv2d(in_channels, num_filters, kernel_size=4, stride=2, padding=1),
+            nn.utils.spectral_norm(nn.Conv2d(in_channels, num_filters, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 2
+        # Layer 2 — spectral norm replaces InstanceNorm2d
         self.layer2 = nn.Sequential(
-            nn.Conv2d(num_filters, num_filters * 2, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.InstanceNorm2d(num_filters * 2),
+            nn.utils.spectral_norm(nn.Conv2d(num_filters, num_filters * 2, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 3
+        # Layer 3 — spectral norm replaces InstanceNorm2d
         self.layer3 = nn.Sequential(
-            nn.Conv2d(num_filters * 2, num_filters * 4, kernel_size=4, stride=2, padding=1, bias=False),
-            nn.InstanceNorm2d(num_filters * 4),
+            nn.utils.spectral_norm(nn.Conv2d(num_filters * 2, num_filters * 4, kernel_size=4, stride=2, padding=1)),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 4 — stride=1 (standard pix2pix PatchGAN)
+        # Layer 4 — spectral norm replaces InstanceNorm2d
         self.layer4 = nn.Sequential(
-            nn.Conv2d(num_filters * 4, num_filters * 8, kernel_size=4, stride=1, padding=1, bias=False),
-            nn.InstanceNorm2d(num_filters * 8),
+            nn.utils.spectral_norm(nn.Conv2d(num_filters * 4, num_filters * 8, kernel_size=4, stride=1, padding=1)),
             nn.LeakyReLU(0.2, inplace=True),
         )
 
-        # Layer 5 — output patch map
-        self.layer5 = nn.Conv2d(num_filters * 8, 1, kernel_size=4, stride=1, padding=1)
+        # Layer 5 — spectral norm, output patch map
+        self.layer5 = nn.utils.spectral_norm(nn.Conv2d(num_filters * 8, 1, kernel_size=4, stride=1, padding=1))
 
     def forward(self, mask: torch.Tensor, image: torch.Tensor) -> torch.Tensor:
         """

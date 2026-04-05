@@ -21,7 +21,7 @@ training:
   lr: 0.0002
   beta1: 0.5
   beta2: 0.999
-  lambda_l1: 10           # Reduced from 100 to sharpen output
+  lambda_l1: 10           # Reduced from 100 — adversarial signal needs weight
   save_every: 5           # checkpoint + sample grid frequency
 
 paths:
