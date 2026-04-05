@@ -11,6 +11,8 @@ Implements the step-by-step procedure from the specification:
 
 import os
 from pathlib import Path
+import json
+from datetime import datetime
 
 import torch
 import torch.optim as optim
@@ -239,13 +241,14 @@ def train(
             f"LR: {epoch_losses['lr']:.6f}"
         )
 
-        # Save checkpoint + sample grid + loss plot every N epochs
+        # Save checkpoint + sample grid + loss plot + metrics every N epochs
         if epoch % save_every == 0 or epoch == epochs:
             _save_checkpoint(generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir)
             _save_sample_grid(
                 generator, val_loader, epoch, samples_dir, device
             )
             _save_loss_plot(history, os.path.join(samples_dir, "loss_curves.png"))
+            _save_metrics(history, os.path.join(samples_dir, "metrics.json"))
 
     print("\nTraining complete.")
     return history
@@ -300,6 +303,27 @@ def _save_loss_plot(history: list[dict], save_path: str):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     plt.savefig(save_path, dpi=100, bbox_inches="tight")
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Metrics saving
+# ---------------------------------------------------------------------------
+
+def _save_metrics(history: list[dict], save_path: str):
+    """Save training history to a JSON file for persistence."""
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    # Convert all values to float for JSON serialization
+    serializable = []
+    for h in history:
+        serializable.append({k: float(v) for k, v in h.items()})
+    with open(save_path, 'w') as f:
+        json.dump(serializable, f, indent=2)
+
+
+def load_metrics(path: str) -> list[dict]:
+    """Load training metrics from a JSON file."""
+    with open(path, 'r') as f:
+        return json.load(f)
 
 
 # ---------------------------------------------------------------------------
