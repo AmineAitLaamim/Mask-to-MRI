@@ -300,7 +300,7 @@ class BalancedLGGDataset(Dataset):
         background_pairs: list[tuple[str, str]] | None = None,
         image_size: int = 256,
         augment: bool = False,
-        tumor_ratio: float = 0.75,
+        tumor_ratio: float = 0.8,
         cache: bool = True,
         seed: int = 42,
     ):
@@ -453,7 +453,7 @@ def build_dataloaders(
     num_workers: int = 0,
     seed: int = 42,
     balanced: bool = True,
-    tumor_ratio: float = 0.75,
+    tumor_ratio: float = 0.8,
 ):
     """
     Create train/val/test DataLoaders with patient-level splitting.
