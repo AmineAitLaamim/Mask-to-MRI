@@ -209,13 +209,17 @@ def train(
     lr_scheduler_D = LinearLRDecay(opt_D, lr, epochs, decay_start, start_epoch=start_epoch)
 
     # Loss
-    gan_criterion = GANLoss(lambda_l1=lambda_l1).to(device)
+    lambda_perceptual = training_cfg.get("lambda_perceptual", 3.0)
+    gan_criterion = GANLoss(
+        lambda_l1=lambda_l1,
+        lambda_perceptual=lambda_perceptual,
+    ).to(device)
 
     # History
     history = []
 
     print(f"\nTraining pix2pix: epoch {start_epoch + 1}–{epochs} of {epochs}")
-    print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}")
+    print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}, lambda_perceptual={lambda_perceptual}")
     print(f"  Schedule: {decay_start} epochs constant + {decay_start} epochs linear decay")
     print(f"  Checkpoint every {save_every} epochs")
     print(f"  Metrics dir: {metrics_dir}")

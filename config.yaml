@@ -23,8 +23,9 @@ training:
   lr: 0.0002
   beta1: 0.5
   beta2: 0.999
-  lambda_l1: 10           # Reduced from 100 — adversarial signal needs weight
-  save_every: 5           # checkpoint + sample grid frequency
+  lambda_l1: 20
+  lambda_perceptual: 3
+  save_every: 5
 
 paths:
   checkpoints: outputs/checkpoints
