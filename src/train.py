@@ -72,6 +72,8 @@ def _train_one_batch(
     gan_criterion: GANLoss,
     device: torch.device,
     step: int = 0,
+    scaler_D: torch.amp.GradScaler | None = None,
+    scaler_G: torch.amp.GradScaler | None = None,
 ) -> dict[str, float]:
     """
     Perform one training step (one batch) for both D and G.
@@ -82,30 +84,45 @@ def _train_one_batch(
     real_mri = real_mri.to(device)
 
     # ----- Step 1: Generate fake MRI -----
-    fake_mri = generator(mask_batch)
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type != "cpu"):
+        fake_mri = generator(mask_batch)
 
     # ----- Step 2: Train Discriminator (every 2 steps) -----
     # Skip training D on odd steps to prevent it from dominating
     if step % 2 == 0:
         opt_D.zero_grad()
-        d_real_pred = discriminator(mask_batch, real_mri)
-        loss_D_real = discriminator_loss_real(d_real_pred)
-        d_fake_pred = discriminator(mask_batch, fake_mri.detach())
-        loss_D_fake = discriminator_loss_fake(d_fake_pred)
-        loss_D = (loss_D_real + loss_D_fake) * 0.5
-        loss_D.backward()
-        opt_D.step()
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type != "cpu"):
+            d_real_pred = discriminator(mask_batch, real_mri)
+            loss_D_real = discriminator_loss_real(d_real_pred)
+            d_fake_pred = discriminator(mask_batch, fake_mri.detach())
+            loss_D_fake = discriminator_loss_fake(d_fake_pred)
+            loss_D = (loss_D_real + loss_D_fake) * 0.5
+        
+        if scaler_D is not None:
+            scaler_D.scale(loss_D).backward()
+            scaler_D.step(opt_D)
+            scaler_D.update()
+        else:
+            loss_D.backward()
+            opt_D.step()
     else:
-        loss_D = torch.tensor(0.0, device=device)  # Placeholder
+        loss_D = torch.tensor(0.0, device=device)
 
     # ----- Step 3: Train Generator -----
     opt_G.zero_grad()
 
     # Recompute discriminator forward pass for generator's adversarial loss
-    d_fake_pred_g = discriminator(mask_batch, fake_mri)
-    loss_G, loss_G_adv, loss_G_L1, loss_perceptual = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
-    loss_G.backward()
-    opt_G.step()
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type != "cpu"):
+        d_fake_pred_g = discriminator(mask_batch, fake_mri)
+        loss_G, loss_G_adv, loss_G_L1, loss_perceptual = gan_criterion(d_fake_pred_g, fake_mri, real_mri)
+
+    if scaler_G is not None:
+        scaler_G.scale(loss_G).backward()
+        scaler_G.step(opt_G)
+        scaler_G.update()
+    else:
+        loss_G.backward()
+        opt_G.step()
 
     return {
         "loss_D": loss_D.item(),
@@ -162,6 +179,15 @@ def train(
     opt_G = optim.Adam(generator.parameters(), lr=lr, betas=(beta1, beta2))
     opt_D = optim.Adam(discriminator.parameters(), lr=lr, betas=(beta1, beta2))
 
+    # Grad Scalers for Mixed Precision
+    if device.type == "cuda":
+        scaler_D = torch.amp.GradScaler(device.type)
+        scaler_G = torch.amp.GradScaler(device.type)
+        print("  → Mixed Precision (AMP) enabled for ~2x speedup")
+    else:
+        scaler_D = None
+        scaler_G = None
+
     # Auto-detect latest checkpoint if resume_from not specified
     if resume_from is None:
         resume_from = find_latest_checkpoint(checkpoint_dir)
@@ -208,7 +234,8 @@ def train(
                 mask_batch, real_mri,
                 generator, discriminator,
                 opt_G, opt_D,
-                gan_criterion, device, step=global_step + step
+                gan_criterion, device, step=global_step + step,
+                scaler_D=scaler_D, scaler_G=scaler_G,
             )
             for k, v in losses.items():
                 epoch_losses[k] += v
@@ -245,7 +272,10 @@ def train(
 
         # Save checkpoint + sample grid + loss plot + metrics every N epochs
         if epoch % save_every == 0 or epoch == epochs:
-            _save_checkpoint(generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir)
+            _save_checkpoint(
+                generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir,
+                scaler_D=scaler_D, scaler_G=scaler_G
+            )
             _save_sample_grid(
                 generator, val_loader, epoch, samples_dir, device
             )
@@ -339,17 +369,25 @@ def _save_checkpoint(
     opt_D: optim.Optimizer,
     epoch: int,
     checkpoint_dir: str,
+    scaler_D: torch.amp.GradScaler | None = None,
+    scaler_G: torch.amp.GradScaler | None = None,
 ):
     """Save model weights and optimizer state."""
     os.makedirs(checkpoint_dir, exist_ok=True)
     path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
-    torch.save({
+    checkpoint = {
         "epoch": epoch,
         "generator_state_dict": generator.state_dict(),
         "discriminator_state_dict": discriminator.state_dict(),
         "opt_G_state_dict": opt_G.state_dict(),
         "opt_D_state_dict": opt_D.state_dict(),
-    }, path)
+    }
+    if scaler_D is not None:
+        checkpoint["scaler_D_state_dict"] = scaler_D.state_dict()
+    if scaler_G is not None:
+        checkpoint["scaler_G_state_dict"] = scaler_G.state_dict()
+        
+    torch.save(checkpoint, path)
     print(f"  → Saved checkpoint: {path}")
 
 
@@ -378,10 +416,12 @@ def load_checkpoint(
     discriminator: PatchGANDiscriminator,
     opt_G: optim.Optimizer | None = None,
     opt_D: optim.Optimizer | None = None,
+    scaler_D: torch.amp.GradScaler | None = None,
+    scaler_G: torch.amp.GradScaler | None = None,
 ) -> int:
     """
     Load a checkpoint. Returns the epoch number.
-    Optimizers are optional (useful for resuming training).
+    Optimizers and Scalers are optional (useful for resuming training).
     """
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     generator.load_state_dict(checkpoint["generator_state_dict"])
@@ -390,6 +430,10 @@ def load_checkpoint(
         opt_G.load_state_dict(checkpoint["opt_G_state_dict"])
     if opt_D is not None:
         opt_D.load_state_dict(checkpoint["opt_D_state_dict"])
+    if scaler_D is not None and "scaler_D_state_dict" in checkpoint:
+        scaler_D.load_state_dict(checkpoint["scaler_D_state_dict"])
+    if scaler_G is not None and "scaler_G_state_dict" in checkpoint:
+        scaler_G.load_state_dict(checkpoint["scaler_G_state_dict"])
     return checkpoint["epoch"]
 
 

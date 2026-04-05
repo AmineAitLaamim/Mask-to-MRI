@@ -156,6 +156,7 @@ def get_val_augmentation(image_size: int = 256):
 class LGGDataset(Dataset):
     """
     PyTorch Dataset for LGG mask→MRI pairs.
+    Optimized to cache all images in RAM for fast training.
 
     Each item returns:
         mask_tensor:  (1, H, W)  normalized [-1, 1]  — condition input
@@ -169,6 +170,7 @@ class LGGDataset(Dataset):
         augment: bool = False,
         seed: int = 42,
         filter_empty_masks: bool = True,
+        cache: bool = True,
     ):
         # Filter out slices with completely black masks (no tumor)
         if filter_empty_masks:
@@ -189,15 +191,18 @@ class LGGDataset(Dataset):
             else get_val_augmentation(image_size)
         )
 
-    def __len__(self) -> int:
-        return len(self.pairs)
+        # Cache data in RAM if enabled
+        self.cached_data = []
+        if cache:
+            print("    Loading dataset into RAM (fast mode)...")
+            for img_path, mask_path in self.pairs:
+                self.cached_data.append(self._load_and_process(img_path, mask_path))
+            print(f"    Cached {len(self.cached_data)} pairs.")
 
-    def __getitem__(self, idx: int):
-        img_path, mask_path = self.pairs[idx]
-
-        # Load raw data
-        image = _load_tif(img_path)   # (H, W, 3) — different MRI sequences
-        mask = _load_tif(mask_path)   # (H, W) or (H, W, 1)
+    def _load_and_process(self, img_path: str, mask_path: str):
+        """Helper to load, augment, and normalize a single pair."""
+        image = _load_tif(img_path)
+        mask = _load_tif(mask_path)
 
         # Ensure mask is 2D and binary
         mask = np.squeeze(mask)
@@ -205,18 +210,25 @@ class LGGDataset(Dataset):
 
         # Apply augmentations
         transformed = self.transform(image=image, mask=mask)
-        image_aug = transformed["image"]      # (H, W, 3)
-        mask_aug = transformed["mask"]        # (H, W)
+        image_aug = transformed["image"]
+        mask_aug = transformed["mask"]
 
-        # Normalize to [-1, 1]
-        image_norm = _normalize(image_aug)    # (H, W, 3), float32
-        mask_norm = _normalize(mask_aug.astype(np.float32))  # (H, W), float32
+        # Normalize
+        image_norm = _normalize(image_aug)
+        mask_norm = _normalize(mask_aug.astype(np.float32))
 
-        # Convert to tensors: mask (1, H, W), image (3, H, W)
-        mask_tensor = torch.from_numpy(mask_norm).unsqueeze(0)       # (1, H, W)
-        image_tensor = torch.from_numpy(image_norm).permute(2, 0, 1)  # (3, H, W)
-
+        # Convert to tensors
+        mask_tensor = torch.from_numpy(mask_norm).unsqueeze(0)
+        image_tensor = torch.from_numpy(image_norm).permute(2, 0, 1)
         return mask_tensor, image_tensor
+
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    def __getitem__(self, idx: int):
+        if self.cached_data:
+            return self.cached_data[idx]
+        return self._load_and_process(*self.pairs[idx])
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +238,7 @@ class LGGDataset(Dataset):
 class BalancedLGGDataset(Dataset):
     """
     PyTorch Dataset that samples tumor and background slices at a fixed ratio.
-    Optimized to accept pre-separated lists to avoid slow disk scanning on Colab.
+    Optimized to cache images in RAM for fast training.
 
     Each item returns:
         mask_tensor:  (1, H, W)  normalized [-1, 1]  — condition input
@@ -241,6 +253,7 @@ class BalancedLGGDataset(Dataset):
         image_size: int = 256,
         augment: bool = False,
         tumor_ratio: float = 0.75,
+        cache: bool = True,
     ):
         self.tumor_ratio = tumor_ratio
         self.image_size = image_size
@@ -259,7 +272,7 @@ class BalancedLGGDataset(Dataset):
             # Fallback: separate them from mixed list (SLOW - scans disk)
             if pairs is None:
                 raise ValueError("Either 'pairs' or both 'tumor_pairs'/'background_pairs' must be provided")
-            
+
             self.tumor_pairs = []
             self.background_pairs = []
             print("    Scanning masks to separate tumor/background...")
@@ -274,6 +287,36 @@ class BalancedLGGDataset(Dataset):
         print(f"    Background slices: {len(self.background_pairs)}")
         print(f"    Tumor ratio:       {tumor_ratio}")
 
+        # Cache data in RAM if enabled
+        self.cached_tumor_data = []
+        self.cached_bg_data = []
+        if cache:
+            print("    Loading dataset into RAM (fast mode)...")
+            for img_path, mask_path in self.tumor_pairs:
+                self.cached_tumor_data.append(self._load_and_process(img_path, mask_path))
+            for img_path, mask_path in self.background_pairs:
+                self.cached_bg_data.append(self._load_and_process(img_path, mask_path))
+            print(f"    Cached {len(self.cached_tumor_data)} tumor + {len(self.cached_bg_data)} bg pairs.")
+
+    def _load_and_process(self, img_path: str, mask_path: str):
+        """Helper to load, augment, and normalize a single pair."""
+        image = _load_tif(img_path)
+        mask = _load_tif(mask_path)
+
+        mask = np.squeeze(mask)
+        mask = (mask > 0).astype(np.uint8) * 255
+
+        transformed = self.transform(image=image, mask=mask)
+        image_aug = transformed["image"]
+        mask_aug = transformed["mask"]
+
+        image_norm = _normalize(image_aug)
+        mask_norm = _normalize(mask_aug.astype(np.float32))
+
+        mask_tensor = torch.from_numpy(mask_norm).unsqueeze(0)
+        image_tensor = torch.from_numpy(image_norm).permute(2, 0, 1)
+        return mask_tensor, image_tensor
+
     def __len__(self) -> int:
         return int(len(self.tumor_pairs) / self.tumor_ratio)
 
@@ -281,32 +324,15 @@ class BalancedLGGDataset(Dataset):
         # Sample based on tumor_ratio
         r = random.random()
         if r < self.tumor_ratio:
+            if self.cached_tumor_data:
+                return random.choice(self.cached_tumor_data)
             img_path, mask_path = random.choice(self.tumor_pairs)
+            return self._load_and_process(img_path, mask_path)
         else:
+            if self.cached_bg_data:
+                return random.choice(self.cached_bg_data)
             img_path, mask_path = random.choice(self.background_pairs)
-
-        # Load raw data
-        image = _load_tif(img_path)   # (H, W, 3) — different MRI sequences
-        mask = _load_tif(mask_path)   # (H, W) or (H, W, 1)
-
-        # Ensure mask is 2D and binary
-        mask = np.squeeze(mask)
-        mask = (mask > 0).astype(np.uint8) * 255
-
-        # Apply augmentations
-        transformed = self.transform(image=image, mask=mask)
-        image_aug = transformed["image"]      # (H, W, 3)
-        mask_aug = transformed["mask"]        # (H, W)
-
-        # Normalize to [-1, 1]
-        image_norm = _normalize(image_aug)    # (H, W, 3), float32
-        mask_norm = _normalize(mask_aug.astype(np.float32))  # (H, W), float32
-
-        # Convert to tensors: mask (1, H, W), image (3, H, W)
-        mask_tensor = torch.from_numpy(mask_norm).unsqueeze(0)       # (1, H, W)
-        image_tensor = torch.from_numpy(image_norm).permute(2, 0, 1)  # (3, H, W)
-
-        return mask_tensor, image_tensor
+            return self._load_and_process(img_path, mask_path)
 
 
 # ---------------------------------------------------------------------------
