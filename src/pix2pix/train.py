@@ -10,9 +10,7 @@ Implements the step-by-step procedure from the specification:
 """
 
 import os
-from pathlib import Path
 import json
-from datetime import datetime
 
 import torch
 import torch.optim as optim
