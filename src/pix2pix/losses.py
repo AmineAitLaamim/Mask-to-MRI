@@ -114,7 +114,7 @@ class GANLoss(nn.Module):
         loss_G, loss_G_adv, loss_G_L1, loss_perc = gan_loss(d_pred_fake, fake_MRI, real_MRI)
     """
 
-    def __init__(self, lambda_l1: float = 10.0, lambda_perceptual: float = 10.0, use_perceptual: bool = True):
+    def __init__(self, lambda_l1: float = 20.0, lambda_perceptual: float = 3.0, use_perceptual: bool = True):
         super().__init__()
         self.lambda_l1 = lambda_l1
         self.lambda_perceptual = lambda_perceptual
