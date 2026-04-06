@@ -1,12 +1,14 @@
-"""mask-to-mri — Synthetic MRI Generation with pix2pix."""
+"""
+pix2pix — Conditional GAN for MRI synthesis from segmentation masks.
 
-# Re-export pix2pix components for backward compatibility
-from .pix2pix import (
-    UNetGenerator,
-    create_generator,
-    weights_init_normal,
-    PatchGANDiscriminator,
-    create_discriminator,
+This package contains the generator, discriminator, loss functions, and training loop
+for the pix2pix conditional GAN that synthesizes brain MRI slices from tumor
+segmentation masks.
+"""
+
+from .generator import UNetGenerator, create_generator, weights_init_normal
+from .discriminator import PatchGANDiscriminator, create_discriminator
+from .losses import (
     GANLoss,
     PerceptualLoss,
     L1Loss,
@@ -15,11 +17,8 @@ from .pix2pix import (
     discriminator_loss_real,
     discriminator_loss_fake,
     generator_adversarial_loss,
-    train,
-    load_checkpoint,
-    find_latest_checkpoint,
-    load_metrics,
 )
+from .train import train, load_checkpoint, find_latest_checkpoint, load_metrics
 
 __all__ = [
     # Generator
