@@ -13,7 +13,6 @@ def build_ddpm_dataloaders(
     raw_dir: str,
     image_size: int = 256,
     batch_size: int = 4,
-    num_workers: int = 0,
     seed: int = 42,
     balanced: bool = True,
     tumor_ratio: float = 0.8,
@@ -29,12 +28,28 @@ def build_ddpm_dataloaders(
     """
     from ..dataset import build_dataloaders
 
-    return build_dataloaders(
+    loaders = build_dataloaders(
         raw_dir=raw_dir,
         image_size=image_size,
         batch_size=batch_size,
-        num_workers=num_workers,
+        num_workers=2,
         seed=seed,
         balanced=balanced,
         tumor_ratio=tumor_ratio,
     )
+
+    # Optimize DataLoaders for speed: pin_memory + persistent workers + prefetch
+    optimized = {}
+    for split, loader in loaders.items():
+        optimized[split] = DataLoader(
+            loader.dataset,
+            batch_size=loader.batch_size,
+            shuffle=(split == "train"),
+            num_workers=2,
+            pin_memory=True,
+            persistent_workers=True,
+            prefetch_factor=4,
+            drop_last=(split == "train"),
+        )
+
+    return optimized
