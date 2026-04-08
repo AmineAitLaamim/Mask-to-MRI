@@ -150,7 +150,8 @@ def train(
     """
     ddpm_cfg = config.get("med_ddpm", {})
     epochs = ddpm_cfg.get("epochs", config["training"]["epochs"])
-    lr = ddpm_cfg.get("lr", 2e-5)
+    lr = ddpm_cfg.get("lr", 1e-4)
+    warmup_epochs = ddpm_cfg.get("warmup_epochs", 5)
     ema_decay = ddpm_cfg.get("ema_decay", 0.995)
     save_every = ddpm_cfg.get("save_every", 5)
     max_grad_norm = ddpm_cfg.get("max_grad_norm", 1.0)
@@ -161,17 +162,48 @@ def train(
         torch.backends.cudnn.allow_tf32 = True
         print("  → TF32 enabled (Ampere+ GPU optimization)")
 
+    # Verify noise schedule (first batch)
+    print("\n  → Verifying noise schedule...")
+    first_mask, first_mri = next(iter(train_loader))
+    first_mri = first_mri.to(device)
+    ddpm.verify_noise_schedule(first_mri[:1])
+    print()
+
+    # Verify model input shapes
+    print("  → Verifying model input shapes...")
+    print(f"     noisy_mri shape: ({first_mri.shape[0]}, {first_mri.shape[1]}, {first_mri.shape[2]}, {first_mri.shape[3]})")
+    print(f"     mask shape:      ({first_mask.shape[0]}, {first_mask.shape[1]}, {first_mask.shape[2]}, {first_mask.shape[3]})")
+    cat_shape = (first_mri.shape[0], first_mri.shape[1] + first_mask.shape[1], first_mri.shape[2], first_mri.shape[3])
+    print(f"     cat shape:       {cat_shape}")
+    print()
+
     # torch.compile (PyTorch 2.0+)
     if use_compile and hasattr(torch, "compile"):
         print("  → Applying torch.compile() to model...")
         model = torch.compile(model)
 
-    # Optimizer — fused AdamW if available (PyTorch 2.0+) — ~15% faster optimizer step
+    # Optimizer — fused AdamW if available (PyTorch 2.0+)
     try:
         optimizer = optim.AdamW(model.parameters(), lr=lr, fused=torch.cuda.is_available())
     except TypeError:
-        # Fallback for older PyTorch versions without fused argument
-        optimizer = optim.Adam(model.parameters(), lr=lr)
+        optimizer = optim.AdamW(model.parameters(), lr=lr)
+
+    # LR Scheduler: Linear warmup → CosineAnnealing
+    warmup_start_lr = lr * 0.1
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            # Warmup phase: linear increase from 10% → 100% LR
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
+            ),
+            # Cosine decay phase: 100% → 0% LR over remaining epochs
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=epochs - warmup_epochs,
+            ),
+        ],
+        milestones=[warmup_epochs],
+    )
 
     # EMA
     ema = EMA(model, decay=ema_decay)
@@ -191,12 +223,15 @@ def train(
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         ema.load_state_dict(checkpoint["ema_state_dict"])
+        if checkpoint.get("scheduler_state_dict"):
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start_epoch = checkpoint["epoch"]
         history = checkpoint.get("history", [])
         print(f"  → Resumed from checkpoint: {resume_from} (epoch {start_epoch})")
 
     print(f"\nTraining DDPM: epoch {start_epoch + 1}–{epochs} of {epochs}")
-    print(f"  LR={lr}, EMA decay={ema_decay}, Timesteps={ddpm.timesteps}")
+    print(f"  LR={lr} (warmup {warmup_epochs} epochs → cosine decay)")
+    print(f"  EMA decay={ema_decay}, Timesteps={ddpm.timesteps}")
     print(f"  Grad clipping: max_norm={max_grad_norm}")
     print(f"  Checkpoint every {save_every} epochs")
     print()
@@ -226,19 +261,23 @@ def train(
 
         avg_loss = epoch_loss / n_batches
 
+        # Step LR scheduler (warmup → cosine decay)
+        scheduler.step()
+        current_lr = scheduler.get_last_lr()[0]
+
         epoch_record = {
             "epoch": epoch,
             "loss": avg_loss,
-            "lr": lr,
+            "lr": current_lr,
         }
 
         # Validation loss at checkpoint intervals (not every epoch to save time)
         if epoch % save_every == 0 or epoch == epochs:
             val_loss = _evaluate_val_loss(val_loader, model, ddpm, device)
             epoch_record["val_loss"] = val_loss
-            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {lr:.6f}")
+            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {current_lr:.6f}")
         else:
-            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {lr:.6f}")
+            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}")
 
         history.append(epoch_record)
 
@@ -246,7 +285,8 @@ def train(
         if epoch % save_every == 0 or epoch == epochs:
             _save_checkpoint(
                 model, optimizer, ema, epoch, history,
-                checkpoint_dir, suffix="ddpm"
+                checkpoint_dir, suffix="ddpm",
+                scheduler=scheduler,
             )
             _save_sample_grid_ddpm(
                 ddpm, model, val_loader, epoch, samples_dir, device,
@@ -271,8 +311,9 @@ def _save_checkpoint(
     history: list[dict],
     checkpoint_dir: str,
     suffix: str = "ddpm",
+    scheduler=None,
 ):
-    """Save model weights, optimizer, EMA state."""
+    """Save model weights, optimizer, EMA state, and scheduler state."""
     os.makedirs(checkpoint_dir, exist_ok=True)
     path = os.path.join(checkpoint_dir, f"checkpoint_{suffix}_epoch_{epoch}.pt")
     checkpoint = {
@@ -280,6 +321,7 @@ def _save_checkpoint(
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "ema_state_dict": ema.state_dict(),
+        "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
         "history": history,
     }
     torch.save(checkpoint, path, _use_new_zipfile_serialization=True)

@@ -222,6 +222,34 @@ class DDPM(nn.Module):
 
         return x
 
+    # ------------------------------------------------------------------
+    # Debug: verify noise schedule
+    # ------------------------------------------------------------------
+
+    def verify_noise_schedule(self, x_start: torch.Tensor) -> dict:
+        """
+        Verify that the noise schedule is correct.
+        Returns dict with std values at t=0, t=500, t=999.
+        Expected: ~0.3, ~0.7, ~1.0 (for normalized data)
+        """
+        with torch.no_grad():
+            noise = torch.randn_like(x_start)
+            B = x_start.shape[0]
+
+            x_t0, _ = self.q_sample(x_start, torch.zeros(B, dtype=torch.long, device=x_start.device), noise=noise)
+            x_t500, _ = self.q_sample(x_start, torch.full((B,), 500, dtype=torch.long, device=x_start.device), noise=noise)
+            x_t999, _ = self.q_sample(x_start, torch.full((B,), 999, dtype=torch.long, device=x_start.device), noise=noise)
+
+        result = {
+            "t=0 std": x_t0.std().item(),
+            "t=500 std": x_t500.std().item(),
+            "t=999 std": x_t999.std().item(),
+        }
+        print("  → Noise schedule verification:")
+        for k, v in result.items():
+            print(f"     {k}: {v:.4f}")
+        return result
+
 
 # ---------------------------------------------------------------------------
 # DDIM Sampling — fast generation in 50-100 steps instead of 1000

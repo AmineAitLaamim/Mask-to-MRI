@@ -43,6 +43,7 @@ med_ddpm:
   attention_resolutions: [16]  # apply attention at 16x16
   epochs: 200
   batch_size: 4
-  lr: 0.00002
+  lr: 0.0001
+  warmup_epochs: 5
   ema_decay: 0.995
   save_every: 5
