@@ -9,7 +9,7 @@ from .unet import ConditionalUNet, create_unet, SinusoidalTimeEmbedding
 from .diffusion import DDPM, linear_beta_schedule, cosine_beta_schedule, DDIMSampler
 from .dataset import build_ddpm_dataloaders
 from .train import (
-    train,
+    train as ddpm_train,
     EMA,
     find_latest_ddpm_checkpoint,
     load_ddpm_checkpoint,
@@ -30,7 +30,7 @@ __all__ = [
     # Dataset
     "build_ddpm_dataloaders",
     # Training
-    "train",
+    "ddpm_train",
     "EMA",
     "find_latest_ddpm_checkpoint",
     "load_ddpm_checkpoint",
