@@ -75,6 +75,7 @@ def _train_one_batch(
     optimizer: optim.Optimizer,
     device: torch.device,
     scaler: torch.amp.GradScaler | None = None,
+    max_grad_norm: float | None = 1.0,
 ) -> float:
     """
     Perform one DDPM training step.
@@ -95,10 +96,15 @@ def _train_one_batch(
 
     if scaler is not None:
         scaler.scale(loss).backward()
+        if max_grad_norm is not None:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
         scaler.step(optimizer)
         scaler.update()
     else:
         loss.backward()
+        if max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
         optimizer.step()
 
     return loss.item()
@@ -119,6 +125,7 @@ def train(
     samples_dir: str = "outputs/samples",
     metrics_dir: str = "outputs/metrics",
     resume_from: str | None = None,
+    use_compile: bool = False,
 ) -> list[dict]:
     """
     Run the full DDPM training loop.
@@ -134,6 +141,7 @@ def train(
         samples_dir: Directory to save sample grids
         metrics_dir: Directory to save metrics
         resume_from: Path to checkpoint to resume from
+        use_compile: If True, apply torch.compile() to the model (PyTorch 2.0+)
 
     Returns:
         List of per-epoch loss dicts
@@ -143,6 +151,12 @@ def train(
     lr = ddpm_cfg.get("lr", 2e-5)
     ema_decay = ddpm_cfg.get("ema_decay", 0.995)
     save_every = ddpm_cfg.get("save_every", 5)
+    max_grad_norm = ddpm_cfg.get("max_grad_norm", 1.0)
+
+    # torch.compile (PyTorch 2.0+)
+    if use_compile and hasattr(torch, "compile"):
+        print("  → Applying torch.compile() to model...")
+        model = torch.compile(model)
 
     # Optimizer (Adam with DDPM-standard lr)
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -171,6 +185,7 @@ def train(
 
     print(f"\nTraining DDPM: epoch {start_epoch + 1}–{epochs} of {epochs}")
     print(f"  LR={lr}, EMA decay={ema_decay}, Timesteps={ddpm.timesteps}")
+    print(f"  Grad clipping: max_norm={max_grad_norm}")
     print(f"  Checkpoint every {save_every} epochs")
     print()
 
@@ -187,6 +202,7 @@ def train(
                 model, ddpm,
                 optimizer, device,
                 scaler=scaler,
+                max_grad_norm=max_grad_norm,
             )
             epoch_loss += loss
             n_batches += 1
@@ -202,11 +218,18 @@ def train(
             "loss": avg_loss,
             "lr": lr,
         }
+
+        # Validation loss at checkpoint intervals (not every epoch to save time)
+        if epoch % save_every == 0 or epoch == epochs:
+            val_loss = _evaluate_val_loss(val_loader, model, ddpm, device)
+            epoch_record["val_loss"] = val_loss
+            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {lr:.6f}")
+        else:
+            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {lr:.6f}")
+
         history.append(epoch_record)
 
-        print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {lr:.6f}")
-
-        # Save checkpoint + samples every N epochs
+        # Save checkpoint + samples + loss plot every N epochs
         if epoch % save_every == 0 or epoch == epochs:
             _save_checkpoint(
                 model, optimizer, ema, epoch, history,
@@ -216,6 +239,7 @@ def train(
                 ddpm, model, val_loader, epoch, samples_dir, device,
                 suffix="ddpm",
             )
+            _save_loss_plot_ddpm(history, os.path.join(samples_dir, "ddpm_loss_curves.png"))
             _save_metrics(history, os.path.join(metrics_dir, "ddpm_training_history.json"))
 
     print("\nDDPM Training complete.")
@@ -332,6 +356,89 @@ def _save_sample_grid_ddpm(
     path = os.path.join(samples_dir, f"{suffix}_samples_epoch_{epoch}.png")
     img.save(path)
     print(f"  → Saved DDPM sample grid: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Validation loss evaluation
+# ---------------------------------------------------------------------------
+
+@torch.no_grad()
+def _evaluate_val_loss(
+    val_loader: DataLoader,
+    model: ConditionalUNet,
+    ddpm: DDPM,
+    device: torch.device,
+    max_batches: int = 10,
+) -> float:
+    """
+    Compute validation loss over a subset of the validation loader.
+
+    Args:
+        val_loader: Validation DataLoader
+        model: U-Net noise predictor
+        ddpm: DDPM wrapper
+        device: torch.device
+        max_batches: Maximum number of batches to evaluate (saves time)
+
+    Returns:
+        Average validation loss
+    """
+    model.eval()
+    val_loss = 0.0
+    n_batches = 0
+
+    for mask_batch, mri_batch in val_loader:
+        if n_batches >= max_batches:
+            break
+        mask_batch = mask_batch.to(device)
+        mri_batch = mri_batch.to(device)
+        B = mri_batch.shape[0]
+        t = torch.randint(0, ddpm.timesteps, (B,), device=device, dtype=torch.long)
+
+        with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
+            loss = ddpm.p_losses(mri_batch, mask_batch, t)
+        val_loss += loss.item()
+        n_batches += 1
+
+    model.train()
+    return val_loss / n_batches if n_batches > 0 else float("inf")
+
+
+# ---------------------------------------------------------------------------
+# Loss plot generation
+# ---------------------------------------------------------------------------
+
+def _save_loss_plot_ddpm(history: list[dict], save_path: str):
+    """Generate and save a loss plot from current DDPM training history."""
+    import matplotlib
+    matplotlib.use('Agg')  # Non-interactive backend for saving
+    import matplotlib.pyplot as plt
+
+    if not history:
+        return
+
+    epochs = [h["epoch"] for h in history]
+    train_loss = [h["loss"] for h in history]
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(epochs, train_loss, "b-", label="Train Loss", alpha=0.8)
+
+    if "val_loss" in history[0]:
+        val_epochs = [h["epoch"] for h in history if "val_loss" in h]
+        val_loss = [h["val_loss"] for h in history if "val_loss" in h]
+        ax.plot(val_epochs, val_loss, "r-", label="Val Loss", alpha=0.8)
+
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("MSE Loss")
+    ax.set_title("DDPM Training Loss")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, dpi=100, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  → Saved DDPM loss plot: {save_path}")
 
 
 # ---------------------------------------------------------------------------

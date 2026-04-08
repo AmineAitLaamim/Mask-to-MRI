@@ -80,23 +80,31 @@ class Block(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    """Single-head self-attention at a specified spatial resolution."""
+    """Multi-head self-attention at a specified spatial resolution."""
 
-    def __init__(self, dim: int, norm_groups: int = 8):
+    def __init__(self, dim: int, norm_groups: int = 8, num_heads: int = 1):
         super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        assert dim % num_heads == 0, f"dim ({dim}) must be divisible by num_heads ({num_heads})"
         self.norm = nn.GroupNorm(norm_groups, dim)
         self.qkv = nn.Conv2d(dim, dim * 3, 1)
         self.out = nn.Conv2d(dim, dim, 1)
-        self.scale = 1.0 / math.sqrt(dim)
+        self.scale = 1.0 / math.sqrt(self.head_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, C, H, W = x.shape
         h = self.norm(x)
         q, k, v = self.qkv(h).chunk(3, dim=1)  # (B, C, H, W) each
-        q, k, v = [t.flatten(2).transpose(1, 2) for t in (q, k, v)]  # (B, HW, C)
-        attn = (q @ k.transpose(1, 2)) * self.scale  # (B, HW, HW)
+        # Reshape for multi-head: (B, num_heads, head_dim, HW)
+        q = q.reshape(B, self.num_heads, self.head_dim, -1)
+        k = k.reshape(B, self.num_heads, self.head_dim, -1)
+        v = v.reshape(B, self.num_heads, self.head_dim, -1)
+        # Attention: (B, heads, HW, HW)
+        attn = (q.transpose(2, 3) @ k) * self.scale
         attn = attn.softmax(dim=-1)
-        out = (attn @ v).transpose(1, 2).reshape(B, C, H, W)
+        out = (attn @ v.transpose(2, 3)).transpose(2, 3)  # (B, heads, head_dim, HW)
+        out = out.reshape(B, C, H, W)
         return self.out(out) + x
 
 
@@ -149,9 +157,12 @@ class ConditionalUNet(nn.Module):
         time_emb_dim: int = 256,
         norm_groups: int = 8,
         attention_resolutions: list[int] | None = None,
+        num_heads: int = 1,
     ):
         super().__init__()
+        self.in_channels = in_channels
         self.attention_resolutions = set(attention_resolutions or [])
+        self.num_heads = num_heads
 
         # Timestep embedding
         self.time_embed = nn.Sequential(
@@ -174,7 +185,7 @@ class ConditionalUNet(nn.Module):
         self.down4 = Block(num_filters * 4, num_filters * 8, time_emb_dim, norm_groups)
 
         # Attention at bottleneck
-        self.attn = AttentionBlock(num_filters * 8, norm_groups) if 16 in self.attention_resolutions else nn.Identity()
+        self.attn = AttentionBlock(num_filters * 8, norm_groups, num_heads) if 16 in self.attention_resolutions else nn.Identity()
 
         # Middle
         self.mid = Block(num_filters * 8, num_filters * 8, time_emb_dim, norm_groups)
@@ -247,6 +258,7 @@ def create_unet(
     time_emb_dim: int = 256,
     norm: str = "group",
     attention_resolutions: list[int] | None = None,
+    num_heads: int = 1,
 ) -> ConditionalUNet:
     """Create conditional U-Net for DDPM."""
     norm_groups = 8 if norm == "group" else 1
@@ -257,4 +269,5 @@ def create_unet(
         time_emb_dim=time_emb_dim,
         norm_groups=norm_groups,
         attention_resolutions=attention_resolutions,
+        num_heads=num_heads,
     )

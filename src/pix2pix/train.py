@@ -213,9 +213,6 @@ def train(
         lambda_perceptual=lambda_perceptual,
     ).to(device)
 
-    # History
-    history = []
-
     print(f"\nTraining pix2pix: epoch {start_epoch + 1}–{epochs} of {epochs}")
     print(f"  LR={lr}, beta1={beta1}, lambda_L1={lambda_l1}, lambda_perceptual={lambda_perceptual}")
     print(f"  Schedule: {decay_start} epochs constant + {decay_start} epochs linear decay")

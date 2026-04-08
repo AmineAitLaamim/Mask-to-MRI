@@ -221,3 +221,104 @@ class DDPM(nn.Module):
             x = self.p_sample(x, t_batch, mask)
 
         return x
+
+
+# ---------------------------------------------------------------------------
+# DDIM Sampling — fast generation in 50-100 steps instead of 1000
+# ---------------------------------------------------------------------------
+
+class DDIMSampler:
+    """
+    Denoising Diffusion Implicit Models (DDIM) sampler.
+
+    DDIM produces deterministic samples (no random noise added during
+    reverse diffusion) and can use far fewer steps than the training
+    timesteps (e.g. 50-100 instead of 1000).
+
+    Based on: Song et al. "Denoising Diffusion Implicit Models" (2021)
+    """
+
+    def __init__(self, ddpm: DDPM, ddim_steps: int = 50, eta: float = 0.0):
+        """
+        Args:
+            ddpm: Trained DDPM model (provides the noise schedule)
+            ddim_steps: Number of denoising steps (default 50)
+            eta: Stochasticity parameter (0 = fully deterministic DDIM,
+                 1 = equivalent to DDPM). Default 0 for speed.
+        """
+        self.ddpm = ddpm
+        self.ddim_steps = ddim_steps
+        self.eta = eta
+
+        # Subsample timesteps: uniform spacing over [0, T-1]
+        T = ddpm.timesteps
+        c = T // ddim_steps
+        self.ddim_timesteps = torch.arange(0, T, c, device=ddpm.betas.device)
+
+        # Precompute DDIM coefficients
+        # alpha_bar for selected timesteps
+        self.alpha_bars = ddpm.alpha_bars[self.ddim_timesteps]
+
+        # For the reverse step, we need alpha_bar_prev
+        alpha_bar_prev = torch.cat([torch.ones(1, device=ddpm.betas.device), ddpm.alpha_bars[:-1]])
+        self.alpha_bars_prev = alpha_bar_prev[self.ddim_timesteps]
+
+        # sigma (variance) — when eta=0, sigma=0 (deterministic)
+        alpha_t = ddpm.alphas[self.ddim_timesteps]
+        variance = (1 - self.alpha_bars_prev) / (1 - self.alpha_bars) * (1 - alpha_t)
+        self.sigma = eta * torch.sqrt(variance)
+
+    @torch.no_grad()
+    def sample(self, mask: torch.Tensor, shape: tuple[int, int, int, int] | None = None) -> torch.Tensor:
+        """
+        Generate images using DDIM fast sampling.
+
+        Args:
+            mask: (B, 1, H, W) — conditioning masks
+            shape: optional override for output shape (B, C, H, W)
+
+        Returns:
+            (B, C, H, W) — generated MRI slices
+        """
+        B = mask.shape[0]
+        C = self.ddpm.model.in_channels if hasattr(self.ddpm.model, "in_channels") else 3
+        H, W = mask.shape[2], mask.shape[3]
+        if shape is not None:
+            B, C, H, W = shape
+
+        # Start from pure noise
+        x = torch.randn(B, C, H, W, device=mask.device)
+
+        # Reverse diffusion: step through the subsampled timesteps
+        for i in reversed(range(self.ddim_steps)):
+            t = self.ddim_timesteps[i]
+            t_batch = torch.full((B,), t.item(), device=mask.device, dtype=torch.long)
+
+            # Predict noise
+            noise_pred = self.ddpm.model(x, t_batch, mask)
+
+            # Get current and previous alpha_bar
+            alpha_bar_t = self.alpha_bars[i]
+            alpha_bar_prev = self.alpha_bars_prev[i]
+            sigma = self.sigma[i]
+
+            # Compute x_0 estimate from noise prediction
+            sqrt_ab = torch.sqrt(alpha_bar_t)
+            sqrt_1mab = torch.sqrt(1 - alpha_bar_t)
+            x_0_pred = (x - sqrt_1mab * noise_pred) / sqrt_ab
+            x_0_pred = torch.clip(x_0_pred, -1.0, 1.0)
+
+            # Compute direction pointing to x_t
+            direction = torch.sqrt(1 - alpha_bar_prev - sigma ** 2) * noise_pred
+
+            # Add stochastic noise (only if eta > 0)
+            if self.eta > 0 and i > 0:
+                noise = torch.randn_like(x)
+                stochastic = sigma * noise
+            else:
+                stochastic = 0
+
+            # Compute x_{t-1}
+            x = torch.sqrt(alpha_bar_prev) * x_0_pred + direction + stochastic
+
+        return x
