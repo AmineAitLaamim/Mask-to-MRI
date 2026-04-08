@@ -328,26 +328,31 @@ def _save_sample_grid_ddpm(
     device: torch.device,
     n_samples: int = 4,
     suffix: str = "ddpm",
+    ddim_steps: int = 50,
 ):
-    """Generate a mask | fake | real grid and save as PNG."""
+    """Generate a mask | fake | real grid and save as PNG using fast DDIM sampling."""
     import numpy as np
     from PIL import Image
+    from .diffusion import DDIMSampler
 
     os.makedirs(samples_dir, exist_ok=True)
 
     # Use EMA model for sampling
     model.eval()
 
+    # Fast DDIM sampling (50 steps vs 1000)
+    ddim = DDIMSampler(ddpm, ddim_steps=ddim_steps, eta=0.0)
+
     samples = []
     with torch.no_grad():
         for mask, real in val_loader:
             if len(samples) >= n_samples:
                 break
-            mask = mask.to(device)
-            real = real.to(device)
+            mask = mask.to(device, non_blocking=True)
+            real = real.to(device, non_blocking=True)
 
-            # Sample from DDPM
-            fake = ddpm.sample(mask)
+            # Sample using fast DDIM
+            fake = ddim.sample(mask)
 
             # Denormalize: [-1,1] → [0,255]
             mask_np = ((mask[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
