@@ -287,14 +287,21 @@ class DDIMSampler:
         # alpha_bar for selected timesteps
         self.alpha_bars = ddpm.alpha_bars[self.ddim_timesteps]
 
-        # For the reverse step, we need alpha_bar_prev
-        alpha_bar_prev = torch.cat([torch.ones(1, device=ddpm.betas.device), ddpm.alpha_bars[:-1]])
-        self.alpha_bars_prev = alpha_bar_prev[self.ddim_timesteps]
+        # For DDIM, at step i we go from t_i to t_{i-1} (previous DDIM timestep)
+        # alpha_bar_prev[i] = alpha_bar at the PREVIOUS DDIM timestep
+        # For i=0 (final step, t→0): we use alpha_bar[-1] = 1.0 as a placeholder
+        #   (but direction coefficient will be zero anyway)
+        alpha_bars_shifted = torch.cat([self.alpha_bars[1:], torch.ones(1, device=ddpm.betas.device)])
+        # alpha_bars_shifted[i] = alpha_bars[i+1] for i < N-1, 1.0 for i = N-1
+        # We need the OPPOSITE direction: alpha_bar_prev[i] = alpha_bar at timestep BEFORE current
+        # i.e. alpha_bar_prev[i] = alpha_bars[i-1] for i>0, and 1.0 for i=0
+        alpha_bar_prev_arr = torch.cat([torch.ones(1, device=ddpm.betas.device), self.alpha_bars[:-1]])
+        self.alpha_bars_prev = alpha_bar_prev_arr
 
         # sigma (variance) — when eta=0, sigma=0 (deterministic)
         alpha_t = ddpm.alphas[self.ddim_timesteps]
         variance = (1 - self.alpha_bars_prev) / (1 - self.alpha_bars) * (1 - alpha_t)
-        self.sigma = eta * torch.sqrt(variance)
+        self.sigma = eta * torch.sqrt(torch.clamp(variance, min=1e-20))
 
     @torch.no_grad()
     def sample(self, mask: torch.Tensor, shape: tuple[int, int, int, int] | None = None) -> torch.Tensor:

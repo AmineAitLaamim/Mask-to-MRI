@@ -162,21 +162,6 @@ def train(
         torch.backends.cudnn.allow_tf32 = True
         print("  → TF32 enabled (Ampere+ GPU optimization)")
 
-    # Verify noise schedule (first batch)
-    print("\n  → Verifying noise schedule...")
-    first_mask, first_mri = next(iter(train_loader))
-    first_mri = first_mri.to(device)
-    ddpm.verify_noise_schedule(first_mri[:1])
-    print()
-
-    # Verify model input shapes
-    print("  → Verifying model input shapes...")
-    print(f"     noisy_mri shape: ({first_mri.shape[0]}, {first_mri.shape[1]}, {first_mri.shape[2]}, {first_mri.shape[3]})")
-    print(f"     mask shape:      ({first_mask.shape[0]}, {first_mask.shape[1]}, {first_mask.shape[2]}, {first_mask.shape[3]})")
-    cat_shape = (first_mri.shape[0], first_mri.shape[1] + first_mask.shape[1], first_mri.shape[2], first_mri.shape[3])
-    print(f"     cat shape:       {cat_shape}")
-    print()
-
     # torch.compile (PyTorch 2.0+)
     if use_compile and hasattr(torch, "compile"):
         print("  → Applying torch.compile() to model...")
