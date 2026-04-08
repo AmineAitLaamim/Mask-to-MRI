@@ -238,10 +238,10 @@ class ConditionalUNet(nn.Module):
         b = self.attn(d4)
         b = self.mid(b, t_emb)
 
-        # Upsampling with skip connections
-        u1 = self.up1(torch.cat([self.us1(b), d4], dim=1), t_emb)  # 256, 32²
-        u2 = self.up2(torch.cat([self.us2(u1), d3], dim=1), t_emb)  # 128, 64²
-        u3 = self.up3(torch.cat([self.us3(u2), d2], dim=1), t_emb)  # 64,  128²
+        # Upsampling with skip connections — concat at same resolution, then upsample
+        u1 = self.us1(self.up1(torch.cat([b, d4], dim=1), t_emb))  # 256, 64²
+        u2 = self.us2(self.up2(torch.cat([u1, d3], dim=1), t_emb))  # 128, 128²
+        u3 = self.us3(self.up3(torch.cat([u2, d2], dim=1), t_emb))  # 64,  256²
         u4 = self.up4(torch.cat([u3, d1], dim=1), t_emb)             # 64,  256²
 
         return self.final(u4)
