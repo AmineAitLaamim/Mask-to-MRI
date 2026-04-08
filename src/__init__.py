@@ -43,9 +43,9 @@ from .med_ddpm import (
     create_unet,
     SinusoidalTimeEmbedding,
     DDPM,
+    DDIMSampler,
     linear_beta_schedule,
     cosine_beta_schedule,
-    DDPMConditionalDataset,
     build_ddpm_dataloaders,
     train as ddpm_train,
     EMA,
@@ -103,10 +103,10 @@ __all__ = [
     "SinusoidalTimeEmbedding",
     # med_ddpm — DDPM
     "DDPM",
+    "DDIMSampler",
     "linear_beta_schedule",
     "cosine_beta_schedule",
     # med_ddpm — Dataset
-    "DDPMConditionalDataset",
     "build_ddpm_dataloaders",
     # med_ddpm — Training
     "ddpm_train",

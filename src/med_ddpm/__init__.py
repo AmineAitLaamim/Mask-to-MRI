@@ -6,8 +6,8 @@ Alternative to pix2pix GAN with more stable training and better mode coverage.
 """
 
 from .unet import ConditionalUNet, create_unet, SinusoidalTimeEmbedding
-from .diffusion import DDPM, linear_beta_schedule, cosine_beta_schedule
-from .dataset import DDPMConditionalDataset, build_ddpm_dataloaders
+from .diffusion import DDPM, linear_beta_schedule, cosine_beta_schedule, DDIMSampler
+from .dataset import build_ddpm_dataloaders
 from .train import (
     train,
     EMA,
@@ -26,8 +26,8 @@ __all__ = [
     "DDPM",
     "linear_beta_schedule",
     "cosine_beta_schedule",
+    "DDIMSampler",
     # Dataset
-    "DDPMConditionalDataset",
     "build_ddpm_dataloaders",
     # Training
     "train",
