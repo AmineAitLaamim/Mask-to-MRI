@@ -213,7 +213,8 @@ def train(
                 checkpoint_dir, suffix="ddpm"
             )
             _save_sample_grid_ddpm(
-                ddpm, model, val_loader, epoch, samples_dir, device
+                ddpm, model, val_loader, epoch, samples_dir, device,
+                suffix="ddpm",
             )
             _save_metrics(history, os.path.join(metrics_dir, "ddpm_training_history.json"))
 
@@ -289,6 +290,7 @@ def _save_sample_grid_ddpm(
     samples_dir: str,
     device: torch.device,
     n_samples: int = 4,
+    suffix: str = "ddpm",
 ):
     """Generate a mask | fake | real grid and save as PNG."""
     import numpy as np
@@ -327,7 +329,7 @@ def _save_sample_grid_ddpm(
     grid = np.concatenate(rows, axis=0)
 
     img = Image.fromarray(grid)
-    path = os.path.join(samples_dir, f"ddpm_samples_epoch_{epoch}.png")
+    path = os.path.join(samples_dir, f"{suffix}_samples_epoch_{epoch}.png")
     img.save(path)
     print(f"  → Saved DDPM sample grid: {path}")
 

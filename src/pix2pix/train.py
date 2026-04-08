@@ -293,13 +293,15 @@ def train(
         if epoch % save_every == 0 or epoch == epochs:
             _save_checkpoint(
                 generator, discriminator, opt_G, opt_D, epoch, checkpoint_dir,
-                scaler_D=scaler_D, scaler_G=scaler_G
+                scaler_D=scaler_D, scaler_G=scaler_G,
+                suffix="pix2pix",
             )
             _save_sample_grid(
-                generator, val_loader, epoch, samples_dir, device
+                generator, val_loader, epoch, samples_dir, device,
+                suffix="pix2pix",
             )
-            _save_loss_plot(history, os.path.join(samples_dir, "loss_curves.png"))
-            _save_metrics(history, os.path.join(metrics_dir, "training_history.json"))
+            _save_loss_plot(history, os.path.join(samples_dir, "pix2pix_loss_curves.png"))
+            _save_metrics(history, os.path.join(metrics_dir, "pix2pix_training_history.json"))
 
     print("\nTraining complete.")
     return history
@@ -390,10 +392,11 @@ def _save_checkpoint(
     checkpoint_dir: str,
     scaler_D: torch.amp.GradScaler | None = None,
     scaler_G: torch.amp.GradScaler | None = None,
+    suffix: str = "pix2pix",
 ):
     """Save model weights and optimizer state."""
     os.makedirs(checkpoint_dir, exist_ok=True)
-    path = os.path.join(checkpoint_dir, f"checkpoint_epoch_{epoch}.pt")
+    path = os.path.join(checkpoint_dir, f"checkpoint_{suffix}_epoch_{epoch}.pt")
     checkpoint = {
         "epoch": epoch,
         "generator_state_dict": generator.state_dict(),
@@ -410,7 +413,7 @@ def _save_checkpoint(
     print(f"  → Saved checkpoint: {path}")
 
 
-def find_latest_checkpoint(checkpoint_dir: str) -> str | None:
+def find_latest_checkpoint(checkpoint_dir: str, suffix: str = "pix2pix") -> str | None:
     """
     Find the latest checkpoint in the checkpoint directory.
     Returns the path to the checkpoint file, or None if no checkpoints exist.
@@ -420,7 +423,7 @@ def find_latest_checkpoint(checkpoint_dir: str) -> str | None:
     if not os.path.exists(checkpoint_dir):
         return None
 
-    checkpoints = sorted(glob.glob(os.path.join(checkpoint_dir, "checkpoint_epoch_*.pt")))
+    checkpoints = sorted(glob.glob(os.path.join(checkpoint_dir, f"checkpoint_{suffix}_epoch_*.pt")))
     if not checkpoints:
         return None
 
@@ -467,6 +470,7 @@ def _save_sample_grid(
     samples_dir: str,
     device: torch.device,
     n_samples: int = 4,
+    suffix: str = "pix2pix",
 ):
     """Generate a mask | fake | real grid and save as PNG."""
     import numpy as np
@@ -509,6 +513,6 @@ def _save_sample_grid(
 
     # Save
     img = Image.fromarray(grid)
-    path = os.path.join(samples_dir, f"samples_epoch_{epoch}.png")
+    path = os.path.join(samples_dir, f"{suffix}_samples_epoch_{epoch}.png")
     img.save(path)
     print(f"  → Saved sample grid: {path}")
