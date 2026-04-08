@@ -200,9 +200,10 @@ class ConditionalUNet(nn.Module):
         self.ds1 = Downsample(num_filters)
         self.ds2 = Downsample(num_filters * 2)
         self.ds3 = Downsample(num_filters * 4)
-        self.us1 = Upsample(num_filters * 8)
-        self.us2 = Upsample(num_filters * 4)
-        self.us3 = Upsample(num_filters * 2)
+        # Upsamplers must match the OUTPUT channels of their corresponding blocks
+        self.us1 = Upsample(num_filters * 4)   # 256 ← output of up1
+        self.us2 = Upsample(num_filters * 2)   # 128 ← output of up2
+        self.us3 = Upsample(num_filters)        # 64  ← output of up3
 
         # Final conv
         self.final = nn.Sequential(
