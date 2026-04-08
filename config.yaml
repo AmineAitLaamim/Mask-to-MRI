@@ -31,3 +31,18 @@ paths:
   checkpoints: outputs/checkpoints
   samples: outputs/samples
   metrics: outputs/metrics
+
+med_ddpm:
+  timesteps: 1000
+  beta_start: 0.0001
+  beta_end: 0.02
+  schedule: linear          # linear | cosine
+  num_filters: 64
+  time_emb_dim: 256
+  norm: group               # group (DDPM standard)
+  attention_resolutions: [16]  # apply attention at 16x16
+  epochs: 200
+  batch_size: 4
+  lr: 0.00002
+  ema_decay: 0.995
+  save_every: 5
