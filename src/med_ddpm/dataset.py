@@ -13,6 +13,7 @@ def build_ddpm_dataloaders(
     raw_dir: str,
     image_size: int = 256,
     batch_size: int = 4,
+    num_workers: int = 2,
     seed: int = 42,
     balanced: bool = True,
     tumor_ratio: float = 0.8,
@@ -32,7 +33,7 @@ def build_ddpm_dataloaders(
         raw_dir=raw_dir,
         image_size=image_size,
         batch_size=batch_size,
-        num_workers=2,
+        num_workers=0,  # Inner loaders use 0 workers (no prefetching)
         seed=seed,
         balanced=balanced,
         tumor_ratio=tumor_ratio,
@@ -45,10 +46,10 @@ def build_ddpm_dataloaders(
             loader.dataset,
             batch_size=loader.batch_size,
             shuffle=(split == "train"),
-            num_workers=2,
+            num_workers=num_workers,
             pin_memory=True,
             persistent_workers=True,
-            prefetch_factor=4,
+            prefetch_factor=4 if num_workers > 0 else None,
             drop_last=(split == "train"),
         )
 
