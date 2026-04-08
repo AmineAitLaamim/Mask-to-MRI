@@ -3,7 +3,7 @@
 # ============================================================
 
 data:
-  raw_dir: data/raw/lgg-mri-segmentation
+  raw_dir: dataset/lgg-mri-segmentation
   processed_dir: data/processed
   synthetic_dir: data/synthetic
   image_size: 256
