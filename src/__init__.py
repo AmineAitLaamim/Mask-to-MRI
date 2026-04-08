@@ -1,4 +1,4 @@
-"""mask-to-mri — Synthetic MRI Generation with pix2pix."""
+"""mask-to-mri — Synthetic MRI Generation with pix2pix and DDPM."""
 
 # Re-export pix2pix components for backward compatibility
 from .pix2pix import (
@@ -37,15 +37,35 @@ from .pix2pix import (
     plot_metrics_from_file,
 )
 
+# Re-export med_ddpm components
+from .med_ddpm import (
+    ConditionalUNet,
+    create_unet,
+    SinusoidalTimeEmbedding,
+    DDPM,
+    linear_beta_schedule,
+    cosine_beta_schedule,
+    DDPMConditionalDataset,
+    build_ddpm_dataloaders,
+    train as ddpm_train,
+    EMA,
+    find_latest_ddpm_checkpoint,
+    load_ddpm_checkpoint,
+    load_ddpm_metrics,
+    generate_from_masks,
+    generate_and_save,
+    load_model_for_sampling,
+)
+
 __all__ = [
-    # Generator
+    # pix2pix — Generator
     "UNetGenerator",
     "create_generator",
     "weights_init_normal",
-    # Discriminator
+    # pix2pix — Discriminator
     "PatchGANDiscriminator",
     "create_discriminator",
-    # Losses
+    # pix2pix — Losses
     "GANLoss",
     "PerceptualLoss",
     "L1Loss",
@@ -54,12 +74,12 @@ __all__ = [
     "discriminator_loss_real",
     "discriminator_loss_fake",
     "generator_adversarial_loss",
-    # Training
+    # pix2pix — Training
     "train",
     "load_checkpoint",
     "find_latest_checkpoint",
     "load_metrics",
-    # Evaluation
+    # pix2pix — Evaluation
     "compute_ssim",
     "compute_ssim_batch",
     "compute_psnr",
@@ -67,7 +87,7 @@ __all__ = [
     "compute_fid_from_paths",
     "compute_dice_score",
     "save_eval_results",
-    # Utilities
+    # pix2pix — Utilities
     "load_config",
     "fix_seed",
     "setup_logger",
@@ -77,4 +97,25 @@ __all__ = [
     "make_sample_grid",
     "plot_loss_curves",
     "plot_metrics_from_file",
+    # med_ddpm — U-Net
+    "ConditionalUNet",
+    "create_unet",
+    "SinusoidalTimeEmbedding",
+    # med_ddpm — DDPM
+    "DDPM",
+    "linear_beta_schedule",
+    "cosine_beta_schedule",
+    # med_ddpm — Dataset
+    "DDPMConditionalDataset",
+    "build_ddpm_dataloaders",
+    # med_ddpm — Training
+    "ddpm_train",
+    "EMA",
+    "find_latest_ddpm_checkpoint",
+    "load_ddpm_checkpoint",
+    "load_ddpm_metrics",
+    # med_ddpm — Sampling
+    "generate_from_masks",
+    "generate_and_save",
+    "load_model_for_sampling",
 ]
