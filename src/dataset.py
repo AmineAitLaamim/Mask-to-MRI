@@ -452,7 +452,7 @@ def build_dataloaders(
     raw_dir: str,
     image_size: int = 256,
     batch_size: int = 1,
-    num_workers: int = 0,
+    num_workers: int = 4,
     seed: int = 42,
     balanced: bool = True,
     tumor_ratio: float = 0.8,
@@ -462,8 +462,17 @@ def build_dataloaders(
 
     Returns dict: {"train": DataLoader, "val": DataLoader, "test": DataLoader}
     """
+    import os
+
     patient_data = get_patient_file_list(raw_dir)
     splits = patient_level_split(patient_data, seed=seed)
+
+    # Clamp workers to system CPU count to avoid warnings/freezes
+    max_workers = os.cpu_count() or 2
+    num_workers = min(num_workers, max_workers)
+
+    use_cuda = torch.cuda.is_available()
+    pin_memory = use_cuda
 
     loaders = {}
     for split_name, pairs in splits.items():
@@ -488,16 +497,16 @@ def build_dataloaders(
             )
         print(f"  {split_name}: {len(dataset)} slices")
 
-        use_cuda = torch.cuda.is_available()
+        is_train = split_name == "train"
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=augment and not isinstance(dataset, BalancedLGGDataset),
-            num_workers=num_workers if augment else max(1, num_workers // 2),
-            pin_memory=use_cuda,
-            persistent_workers=use_cuda and num_workers > 0,
-            prefetch_factor=2 if num_workers > 0 else None,
-            drop_last=False,
+            shuffle=is_train and not isinstance(dataset, BalancedLGGDataset),
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=True if num_workers > 0 else False,
+            prefetch_factor=4 if num_workers > 0 else None,
+            drop_last=is_train,
         )
         loaders[split_name] = loader
 
