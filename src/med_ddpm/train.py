@@ -168,7 +168,27 @@ def train(
     except TypeError:
         optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    # Resume from checkpoint BEFORE compiling (compile wraps model, changes key names)
+    # LR Scheduler: Linear warmup → CosineAnnealing (created before checkpoint loading)
+    warmup_start_lr = lr * 0.1
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
+            ),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=epochs - warmup_epochs,
+            ),
+        ],
+        milestones=[warmup_epochs],
+    )
+
+    # EMA (created before checkpoint loading so we can restore its state)
+    ema_decay_early = 0.9
+    ema_decay_late = 0.999
+    ema = EMA(model, decay=ema_decay_early)
+
+    # Resume from checkpoint BEFORE compiling
     start_epoch = 0
     history = []
     if resume_from and os.path.exists(resume_from):
@@ -176,7 +196,6 @@ def train(
 
         # Handle checkpoints saved with/without torch.compile
         model_state = checkpoint["model_state_dict"]
-        # Strip _orig_mod. prefix if present (from old compiled checkpoints)
         if any(k.startswith("_orig_mod.") for k in model_state.keys()):
             model_state = {k.replace("_orig_mod.", ""): v for k, v in model_state.items()}
 
@@ -193,26 +212,6 @@ def train(
     if use_compile and hasattr(torch, "compile"):
         print("  → Applying torch.compile() to model...")
         model = torch.compile(model)
-    warmup_start_lr = lr * 0.1
-    scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimizer,
-        schedulers=[
-            # Warmup phase: linear increase from 10% → 100% LR
-            torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
-            ),
-            # Cosine decay phase: 100% → 0% LR over remaining epochs
-            torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=epochs - warmup_epochs,
-            ),
-        ],
-        milestones=[warmup_epochs],
-    )
-
-    # EMA — dynamic decay: low decay early (tracks training closely), high decay after convergence
-    ema_decay_early = 0.9    # Epochs 0-20: tracks training model closely
-    ema_decay_late = 0.999   # Epoch 20+: smooth averaging for final samples
-    ema = EMA(model, decay=ema_decay_early)
 
     # Grad Scaler
     if device.type == "cuda":
