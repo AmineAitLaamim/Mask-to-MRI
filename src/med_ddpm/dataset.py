@@ -21,36 +21,17 @@ def build_ddpm_dataloaders(
     """
     Create train/val/test DataLoaders for DDPM training.
 
-    Reuses build_dataloaders from src/dataset.py directly — no wrapping needed
-    since LGGDataset and BalancedLGGDataset already return (mask, mri) pairs.
-
     Returns:
         {"train": DataLoader, "val": DataLoader, "test": DataLoader}
     """
     from ..dataset import build_dataloaders
 
-    loaders = build_dataloaders(
+    return build_dataloaders(
         raw_dir=raw_dir,
         image_size=image_size,
         batch_size=batch_size,
-        num_workers=0,  # Inner loaders use 0 workers (no prefetching)
+        num_workers=num_workers,
         seed=seed,
         balanced=balanced,
         tumor_ratio=tumor_ratio,
     )
-
-    # Optimize DataLoaders for speed: pin_memory + persistent workers + prefetch
-    optimized = {}
-    for split, loader in loaders.items():
-        optimized[split] = DataLoader(
-            loader.dataset,
-            batch_size=loader.batch_size,
-            shuffle=(split == "train"),
-            num_workers=num_workers,
-            pin_memory=True,
-            persistent_workers=True,
-            prefetch_factor=4 if num_workers > 0 else None,
-            drop_last=(split == "train"),
-        )
-
-    return optimized
