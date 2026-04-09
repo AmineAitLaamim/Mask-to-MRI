@@ -13,7 +13,7 @@ def build_ddpm_dataloaders(
     raw_dir: str,
     image_size: int = 256,
     batch_size: int = 4,
-    num_workers: int = 4,
+    num_workers: int = 2,
     seed: int = 42,
     balanced: bool = True,
     tumor_ratio: float = 0.8,
@@ -24,6 +24,12 @@ def build_ddpm_dataloaders(
     Returns:
         {"train": DataLoader, "val": DataLoader, "test": DataLoader}
     """
+    import os
+
+    # Clamp workers to system CPU count to avoid Colab warnings/freezes
+    max_workers = os.cpu_count() or 2
+    num_workers = min(num_workers, max_workers)
+
     from ..dataset import build_dataloaders
 
     return build_dataloaders(
