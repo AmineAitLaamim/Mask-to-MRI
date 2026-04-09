@@ -162,11 +162,6 @@ def train(
         torch.backends.cudnn.allow_tf32 = True
         print("  → TF32 enabled (Ampere+ GPU optimization)")
 
-    # torch.compile (PyTorch 2.0+)
-    if use_compile and hasattr(torch, "compile"):
-        print("  → Applying torch.compile() to model...")
-        model = torch.compile(model)
-
     # Optimizer — fused AdamW if available (PyTorch 2.0+)
     try:
         optimizer = optim.AdamW(model.parameters(), lr=lr, fused=torch.cuda.is_available())
