@@ -276,6 +276,7 @@ def train(
             _save_sample_grid_ddpm(
                 ddpm, model, val_loader, epoch, samples_dir, device,
                 suffix="ddpm",
+                ema=ema,
             )
             _save_loss_plot_ddpm(history, os.path.join(samples_dir, "ddpm_loss_curves.png"))
             _save_metrics(history, os.path.join(metrics_dir, "ddpm_training_history.json"))
@@ -356,6 +357,7 @@ def _save_sample_grid_ddpm(
     n_samples: int = 4,
     suffix: str = "ddpm",
     ddim_steps: int = 50,
+    ema: EMA | None = None,
 ):
     """Generate a mask | fake | real grid and save as PNG using fast DDIM sampling."""
     import numpy as np
@@ -364,8 +366,10 @@ def _save_sample_grid_ddpm(
 
     os.makedirs(samples_dir, exist_ok=True)
 
-    # Use EMA model for sampling
+    # Use EMA model for sampling (better quality than live weights)
     model.eval()
+    if ema is not None:
+        ema.apply_shadow()
 
     # Fast DDIM sampling (50 steps vs 1000)
     ddim = DDIMSampler(ddpm, ddim_steps=ddim_steps, eta=0.0)

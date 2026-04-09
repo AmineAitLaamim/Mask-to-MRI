@@ -179,10 +179,13 @@ class DDPM(nn.Module):
         x_0_pred = (x_t - sqrt_1mab * noise_pred) / sqrt_ab
         x_0_pred = torch.clip(x_0_pred, -1.0, 1.0)  # Clip to valid range
 
-        # Compute mean of posterior
-        coef1 = self._gather(self.posterior_mean_coef1, t)
-        coef2 = self._gather(self.posterior_mean_coef2, t)
-        mean = coef1 * x_0_pred + coef2 * x_t
+        # Compute mean of posterior (DDPM paper, Appendix A)
+        # mu = c_x0 * x_0 + c_xt * x_t
+        # where c_x0 = sqrt(alpha_bar_{t-1}) * beta_t / (1 - alpha_bar_t)  ← posterior_mean_coef2
+        #       c_xt = sqrt(alpha_bar_t) * (1 - alpha_bar_{t-1}) / (1 - alpha_bar_t)  ← posterior_mean_coef1
+        c_x0 = self._gather(self.posterior_mean_coef2, t)
+        c_xt = self._gather(self.posterior_mean_coef1, t)
+        mean = c_x0 * x_0_pred + c_xt * x_t
 
         # Add noise (except at t=0)
         var = self._gather(self.posterior_variance, t)
