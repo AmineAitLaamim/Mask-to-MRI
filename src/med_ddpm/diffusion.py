@@ -79,9 +79,9 @@ class DDPM(nn.Module):
         # Posterior coefficients (following original Med-DDPM: mobaidoctor/med-ddpm)
         # coef1 (for x_0): beta_t * sqrt(alpha_bar_{t-1}) / (1 - alpha_bar_t)
         # coef2 (for x_t): (1 - alpha_bar_{t-1}) * sqrt(alpha_t) / (1 - alpha_bar_t)
-        alpha_bar_prev = torch.cat([torch.ones(1, device=device), alpha_bars[:-1]])
-        self.register_buffer("posterior_mean_coef1", (betas * torch.sqrt(alpha_bar_prev) / (1 - alpha_bars)).to(device))
-        self.register_buffer("posterior_mean_coef2", ((1 - alpha_bar_prev) * torch.sqrt(alphas) / (1 - alpha_bars)).to(device))
+        alpha_bar_prev = torch.cat([torch.ones(1), alpha_bars[:-1]]).to(device)
+        self.register_buffer("posterior_mean_coef1", (betas.to(device) * torch.sqrt(alpha_bar_prev) / (1 - alpha_bars.to(device))))
+        self.register_buffer("posterior_mean_coef2", ((1 - alpha_bar_prev) * torch.sqrt(alphas.to(device)) / (1 - alpha_bars.to(device))))
         self.register_buffer("posterior_variance", self._compute_posterior_variance().to(device))
 
     def _compute_posterior_variance(self) -> torch.Tensor:
