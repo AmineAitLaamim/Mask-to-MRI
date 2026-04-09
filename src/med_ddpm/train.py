@@ -190,8 +190,10 @@ def train(
         milestones=[warmup_epochs],
     )
 
-    # EMA
-    ema = EMA(model, decay=ema_decay)
+    # EMA — dynamic decay: low decay early (tracks training closely), high decay after convergence
+    ema_decay_early = 0.9    # Epochs 0-20: tracks training model closely
+    ema_decay_late = 0.999   # Epoch 20+: smooth averaging for final samples
+    ema = EMA(model, decay=ema_decay_early)
 
     # Grad Scaler
     if device.type == "cuda":
@@ -250,19 +252,39 @@ def train(
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
 
+        # Dynamic EMA decay: low early, high after convergence
+        if epoch < 20:
+            if ema.decay != ema_decay_early:
+                ema.decay = ema_decay_early
+        else:
+            if ema.decay != ema_decay_late:
+                ema.decay = ema_decay_late
+
+        # Print prediction std at first batch (sanity check for collapse)
+        pred_std = None
+        with torch.no_grad():
+            sample_mask, sample_mri = next(iter(train_loader))
+            sample_mask = sample_mask[:1].to(device)
+            sample_mri = sample_mri[:1].to(device)
+            t_test = torch.randint(0, ddpm.timesteps, (1,), device=device)
+            x_noisy, noise = ddpm.q_sample(sample_mri, t_test)
+            pred_noise = model(x_noisy, t_test, sample_mask)
+            pred_std = pred_noise.std().item()
+
         epoch_record = {
             "epoch": epoch,
             "loss": avg_loss,
             "lr": current_lr,
+            "pred_std": pred_std,
         }
 
         # Validation loss at checkpoint intervals (not every epoch to save time)
         if epoch % save_every == 0 or epoch == epochs:
             val_loss = _evaluate_val_loss(val_loader, model, ddpm, device)
             epoch_record["val_loss"] = val_loss
-            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {current_lr:.6f}")
+            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {current_lr:.6f} | Pred std: {pred_std:.4f}")
         else:
-            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}")
+            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f} | Pred std: {pred_std:.4f}")
 
         history.append(epoch_record)
 
@@ -356,25 +378,35 @@ def _save_sample_grid_ddpm(
     device: torch.device,
     n_samples: int = 4,
     suffix: str = "ddpm",
-    ddim_steps: int = 50,
     ema: EMA | None = None,
+    default_ddim_steps: int = 50,
 ):
-    """Generate a mask | fake | real grid and save as PNG using fast DDIM sampling."""
+    """Generate a mask | fake | real grid and save as PNG using DDIM sampling."""
     import numpy as np
     from PIL import Image
     from .diffusion import DDIMSampler
 
     os.makedirs(samples_dir, exist_ok=True)
 
-    # Use EMA model for sampling (better quality than live weights)
     model.eval()
-    if ema is not None:
-        ema.apply_shadow()
 
-    # Fast DDIM sampling (50 steps vs 1000)
+    # Before epoch 30: use training model directly (EMA not yet converged)
+    # After epoch 30: use EMA shadow (smoother, higher quality)
+    use_ema = ema is not None and epoch >= 30
+    if use_ema:
+        ema.apply_shadow()
+        print(f"  → Using EMA shadow for sampling (epoch {epoch})")
+    else:
+        print(f"  → Using live model weights for sampling (epoch {epoch} < 30)")
+
+    # More DDIM steps early in training (partially trained model needs finer steps)
+    ddim_steps = 200 if epoch < 50 else default_ddim_steps
+    print(f"  → DDIM steps: {ddim_steps}")
+
     ddim = DDIMSampler(ddpm, ddim_steps=ddim_steps, eta=0.0)
 
     samples = []
+    fake_std_values = []
     with torch.no_grad():
         for mask, real in val_loader:
             if len(samples) >= n_samples:
@@ -384,6 +416,7 @@ def _save_sample_grid_ddpm(
 
             # Sample using fast DDIM
             fake = ddim.sample(mask)
+            fake_std_values.append(fake.std().item())
 
             # Denormalize: [-1,1] → [0,255]
             mask_np = ((mask[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
@@ -391,6 +424,15 @@ def _save_sample_grid_ddpm(
             fake_np = ((fake[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
 
             samples.append((mask_np, fake_np, real_np))
+
+    # Sanity check: detect if samples look like noise
+    if fake_std_values:
+        avg_fake_std = np.mean(fake_std_values)
+        if avg_fake_std < 0.1:
+            print(f"  ⚠️  WARNING: Samples look like noise (avg std={avg_fake_std:.3f}) — skipping grid save")
+            return
+        else:
+            print(f"  → Sample std: {avg_fake_std:.3f} — saving grid")
 
     # Build grid: 3 columns × n_samples rows
     rows = []
