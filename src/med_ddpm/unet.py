@@ -155,9 +155,9 @@ class ConditionalUNet(nn.Module):
         cond_channels: int = 1,      # mask channels
         num_filters: int = 64,
         time_emb_dim: int = 256,
-        norm_groups: int = 8,
+        norm_groups: int = 32,       # 32 groups (matches original Med-DDPM)
         attention_resolutions: list[int] | None = None,
-        num_heads: int = 1,
+        num_heads: int = 4,          # 4 heads (matches original Med-DDPM)
     ):
         super().__init__()
         self.in_channels = in_channels
@@ -205,11 +205,14 @@ class ConditionalUNet(nn.Module):
         self.us2 = Upsample(num_filters * 2)   # 128 ← output of up2
         self.us3 = Upsample(num_filters)        # 64  ← output of up3
 
-        # Final conv
+        # Final conv with zero init for stable training start (matches original Med-DDPM)
+        final_conv = nn.Conv2d(num_filters, in_channels, 3, padding=1)
+        nn.init.zeros_(final_conv.weight)
+        nn.init.zeros_(final_conv.bias)
         self.final = nn.Sequential(
             nn.GroupNorm(norm_groups, num_filters),
             nn.SiLU(),
-            nn.Conv2d(num_filters, in_channels, 1),  # Predict noise for in_channels
+            final_conv,
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -259,10 +262,10 @@ def create_unet(
     time_emb_dim: int = 256,
     norm: str = "group",
     attention_resolutions: list[int] | None = None,
-    num_heads: int = 1,
+    num_heads: int = 4,
 ) -> ConditionalUNet:
     """Create conditional U-Net for DDPM."""
-    norm_groups = 8 if norm == "group" else 1
+    norm_groups = 32 if norm == "group" else 1
     return ConditionalUNet(
         in_channels=in_channels,
         cond_channels=cond_channels,

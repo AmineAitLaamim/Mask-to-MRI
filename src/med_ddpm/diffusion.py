@@ -148,7 +148,8 @@ class DDPM(nn.Module):
         # Model predicts the noise that was added
         noise_pred = self.model(x_noisy, t, mask)
 
-        return F.mse_loss(noise_pred, noise)
+        # L1 loss produces sharper samples (matches original Med-DDPM)
+        return F.l1_loss(noise_pred, noise)
 
     # ------------------------------------------------------------------
     # Reverse process (p) — denoise step
