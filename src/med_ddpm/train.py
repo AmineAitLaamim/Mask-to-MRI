@@ -173,7 +173,24 @@ def train(
     except TypeError:
         optimizer = optim.AdamW(model.parameters(), lr=lr)
 
-    # LR Scheduler: Linear warmup → CosineAnnealing
+    # Resume from checkpoint BEFORE compiling (compile wraps model, changes key names)
+    start_epoch = 0
+    history = []
+    if resume_from and os.path.exists(resume_from):
+        checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        ema.load_state_dict(checkpoint["ema_state_dict"])
+        if checkpoint.get("scheduler_state_dict"):
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        start_epoch = checkpoint["epoch"]
+        history = checkpoint.get("history", [])
+        print(f"  → Resumed from checkpoint: {resume_from} (epoch {start_epoch})")
+
+    # torch.compile (PyTorch 2.0+) — apply AFTER checkpoint loading
+    if use_compile and hasattr(torch, "compile"):
+        print("  → Applying torch.compile() to model...")
+        model = torch.compile(model)
     warmup_start_lr = lr * 0.1
     scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer,
@@ -201,20 +218,6 @@ def train(
         print("  → Mixed Precision (AMP) enabled")
     else:
         scaler = None
-
-    # Resume from checkpoint
-    start_epoch = 0
-    history = []
-    if resume_from and os.path.exists(resume_from):
-        checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        ema.load_state_dict(checkpoint["ema_state_dict"])
-        if checkpoint.get("scheduler_state_dict"):
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
-        start_epoch = checkpoint["epoch"]
-        history = checkpoint.get("history", [])
-        print(f"  → Resumed from checkpoint: {resume_from} (epoch {start_epoch})")
 
     print(f"\nTraining DDPM: epoch {start_epoch + 1}–{epochs} of {epochs}")
     print(f"  LR={lr} (warmup {warmup_epochs} epochs → cosine decay)")
