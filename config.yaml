@@ -42,7 +42,7 @@ med_ddpm:
   norm: group               # group (DDPM standard)
   attention_resolutions: [16]  # apply attention at 16x16
   epochs: 200
-  batch_size: 8
+  batch_size: 4
   lr: 0.0002
   warmup_epochs: 5
   ema_decay: 0.995
