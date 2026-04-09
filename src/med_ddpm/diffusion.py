@@ -76,20 +76,13 @@ class DDPM(nn.Module):
         self.register_buffer("sqrt_alpha_bars", torch.sqrt(alpha_bars).to(device))
         self.register_buffer("sqrt_one_minus_alpha_bars", torch.sqrt(1 - alpha_bars).to(device))
 
-        # For sampling: posterior variance
-        self.register_buffer("posterior_mean_coef1", self._compute_posterior_coef1().to(device))
-        self.register_buffer("posterior_mean_coef2", self._compute_posterior_coef2().to(device))
+        # Posterior coefficients (following original Med-DDPM: mobaidoctor/med-ddpm)
+        # coef1 (for x_0): beta_t * sqrt(alpha_bar_{t-1}) / (1 - alpha_bar_t)
+        # coef2 (for x_t): (1 - alpha_bar_{t-1}) * sqrt(alpha_t) / (1 - alpha_bar_t)
+        alpha_bar_prev = torch.cat([torch.ones(1, device=device), alpha_bars[:-1]])
+        self.register_buffer("posterior_mean_coef1", (betas * torch.sqrt(alpha_bar_prev) / (1 - alpha_bars)).to(device))
+        self.register_buffer("posterior_mean_coef2", ((1 - alpha_bar_prev) * torch.sqrt(alphas) / (1 - alpha_bars)).to(device))
         self.register_buffer("posterior_variance", self._compute_posterior_variance().to(device))
-
-    def _compute_posterior_coef1(self) -> torch.Tensor:
-        """sqrt(alpha_t) * (1 - alpha_bar_{t-1}) / (1 - alpha_bar_t)"""
-        alpha_bar_prev = torch.cat([torch.ones(1, device=self.betas.device), self.alpha_bars[:-1]])
-        return self.sqrt_alpha_bars * (1 - alpha_bar_prev) / (1 - self.alpha_bars)
-
-    def _compute_posterior_coef2(self) -> torch.Tensor:
-        """sqrt(alpha_bar_{t-1}) * (1 - alpha_t) / (1 - alpha_bar_t)"""
-        alpha_bar_prev = torch.cat([torch.ones(1, device=self.betas.device), self.alpha_bars[:-1]])
-        return torch.sqrt(alpha_bar_prev) * self.betas / (1 - self.alpha_bars)
 
     def _compute_posterior_variance(self) -> torch.Tensor:
         """Variance of q(x_{t-1} | x_t, x_0)"""
@@ -179,13 +172,10 @@ class DDPM(nn.Module):
         x_0_pred = (x_t - sqrt_1mab * noise_pred) / sqrt_ab
         x_0_pred = torch.clip(x_0_pred, -1.0, 1.0)  # Clip to valid range
 
-        # Compute mean of posterior (DDPM paper, Appendix A)
-        # mu = c_x0 * x_0 + c_xt * x_t
-        # where c_x0 = sqrt(alpha_bar_{t-1}) * beta_t / (1 - alpha_bar_t)  ← posterior_mean_coef2
-        #       c_xt = sqrt(alpha_bar_t) * (1 - alpha_bar_{t-1}) / (1 - alpha_bar_t)  ← posterior_mean_coef1
-        c_x0 = self._gather(self.posterior_mean_coef2, t)
-        c_xt = self._gather(self.posterior_mean_coef1, t)
-        mean = c_x0 * x_0_pred + c_xt * x_t
+        # Compute mean of posterior
+        coef1 = self._gather(self.posterior_mean_coef1, t)
+        coef2 = self._gather(self.posterior_mean_coef2, t)
+        mean = coef1 * x_0_pred + coef2 * x_t
 
         # Add noise (except at t=0)
         var = self._gather(self.posterior_variance, t)
