@@ -87,27 +87,27 @@ def _train_one_batch(
     mri_batch = mri_batch.to(device, non_blocking=True)
     B = mri_batch.shape[0]
 
-    # Expanded AMP autocast covers the entire forward pass including timestep sampling
-    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
-        # Sample random timesteps (inside autocast for full coverage)
-        t = torch.randint(0, ddpm.timesteps, (B,), device=device, dtype=torch.long)
+    optimizer.zero_grad()
 
-        optimizer.zero_grad()
+    # AMP autocast covers only the forward pass
+    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=device.type == "cuda"):
+        # Sample random timesteps
+        t = torch.randint(0, ddpm.timesteps, (B,), device=device, dtype=torch.long)
 
         loss = ddpm.p_losses(mri_batch, mask_batch, t)
 
-        if scaler is not None:
-            scaler.scale(loss).backward()
-            if max_grad_norm is not None:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            if max_grad_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
-            optimizer.step()
+    if scaler is not None:
+        scaler.scale(loss).backward()
+        if max_grad_norm is not None:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        loss.backward()
+        if max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm)
+        optimizer.step()
 
     return loss.item()
 
@@ -223,13 +223,25 @@ def train(
     print(f"  Checkpoint every {save_every} epochs")
     print()
 
+    # Pre-create a reusable iterator for the pred_std sanity check
+    # to avoid calling iter(train_loader) every epoch
+    _val_iter_cache = None
+
     for epoch in range(start_epoch + 1, epochs + 1):
         # Training phase
         model.train()
         epoch_loss = 0.0
         n_batches = 0
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
+        # tqdm with disable=len(train_loader) < 10 to avoid overhead on small loaders
+        pbar = tqdm(
+            train_loader,
+            desc=f"Epoch {epoch}/{epochs}",
+            leave=False,
+            disable=False,
+            miniters=max(1, len(train_loader) // 20),  # Update progress at most 20 times per epoch
+            mininterval=0.5,
+        )
         for mask_batch, mri_batch in pbar:
             loss = _train_one_batch(
                 mask_batch, mri_batch,
@@ -242,8 +254,8 @@ def train(
             n_batches += 1
             pbar.set_postfix({"loss": f"{loss:.4f}"})
 
-            # EMA update every batch (skip first epoch — shadow starts from random init)
-            if epoch > 1:
+            # EMA update every 10 batches (skip first epoch — shadow starts from random init)
+            if epoch > 1 and n_batches % 10 == 0:
                 ema.update()
 
         avg_loss = epoch_loss / n_batches
@@ -260,12 +272,19 @@ def train(
             if ema.decay != ema_decay_late:
                 ema.decay = ema_decay_late
 
-        # Print prediction std at first batch (sanity check for collapse)
+        # --- Prediction std sanity check (efficient, reuses existing iterator) ---
         pred_std = None
         with torch.no_grad():
-            sample_mask, sample_mri = next(iter(train_loader))
-            sample_mask = sample_mask[:1].to(device)
-            sample_mri = sample_mri[:1].to(device)
+            if _val_iter_cache is None:
+                _val_iter_cache = iter(train_loader)
+            try:
+                sample_mask, sample_mri = next(_val_iter_cache)
+            except StopIteration:
+                _val_iter_cache = iter(train_loader)
+                sample_mask, sample_mri = next(_val_iter_cache)
+
+            sample_mask = sample_mask[:1].to(device, non_blocking=True)
+            sample_mri = sample_mri[:1].to(device, non_blocking=True)
             t_test = torch.randint(0, ddpm.timesteps, (1,), device=device)
             x_noisy, noise = ddpm.q_sample(sample_mri, t_test)
             pred_noise = model(x_noisy, t_test, sample_mask)
@@ -287,6 +306,7 @@ def train(
             print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f} | Pred std: {pred_std:.4f}")
 
         history.append(epoch_record)
+        model.train()  # Ensure we're back in training mode after possible eval in val/sampling
 
         # Save checkpoint + samples + loss plot every N epochs
         if epoch % save_every == 0 or epoch == epochs:
@@ -407,9 +427,12 @@ def _save_sample_grid_ddpm(
 
     samples = []
     fake_std_values = []
+
+    # Grab exactly n_samples batches instead of iterating the whole loader
     with torch.no_grad():
+        batches_collected = 0
         for mask, real in val_loader:
-            if len(samples) >= n_samples:
+            if batches_collected >= n_samples:
                 break
             mask = mask.to(device, non_blocking=True)
             real = real.to(device, non_blocking=True)
@@ -424,6 +447,7 @@ def _save_sample_grid_ddpm(
             fake_np = ((fake[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
 
             samples.append((mask_np, fake_np, real_np))
+            batches_collected += 1
 
     # Sanity check: detect if samples look like noise
     if fake_std_values:

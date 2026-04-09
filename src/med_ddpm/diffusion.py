@@ -79,15 +79,15 @@ class DDPM(nn.Module):
         # Posterior coefficients (following original Med-DDPM: mobaidoctor/med-ddpm)
         # coef1 (for x_0): beta_t * sqrt(alpha_bar_{t-1}) / (1 - alpha_bar_t)
         # coef2 (for x_t): (1 - alpha_bar_{t-1}) * sqrt(alpha_t) / (1 - alpha_bar_t)
-        alpha_bar_prev = torch.cat([torch.ones(1), alpha_bars[:-1]]).to(device)
-        self.register_buffer("posterior_mean_coef1", (betas.to(device) * torch.sqrt(alpha_bar_prev) / (1 - alpha_bars.to(device))))
-        self.register_buffer("posterior_mean_coef2", ((1 - alpha_bar_prev) * torch.sqrt(alphas.to(device)) / (1 - alpha_bars.to(device))))
-        self.register_buffer("posterior_variance", self._compute_posterior_variance().to(device))
+        alpha_bar_prev = torch.cat([torch.ones(1, device=device), alpha_bars[:-1].to(device)])
+        betas_d = betas.to(device)
+        alphas_d = alphas.to(device)
+        alpha_bars_d = alpha_bars.to(device)
+        one_mab_d = 1 - alpha_bars_d
 
-    def _compute_posterior_variance(self) -> torch.Tensor:
-        """Variance of q(x_{t-1} | x_t, x_0)"""
-        alpha_bar_prev = torch.cat([torch.ones(1, device=self.betas.device), self.alpha_bars[:-1]])
-        return self.betas * (1 - alpha_bar_prev) / (1 - self.alpha_bars)
+        self.register_buffer("posterior_mean_coef1", (betas_d * torch.sqrt(alpha_bar_prev) / one_mab_d))
+        self.register_buffer("posterior_mean_coef2", ((1 - alpha_bar_prev) * torch.sqrt(alphas_d) / one_mab_d))
+        self.register_buffer("posterior_variance", betas_d * (1 - alpha_bar_prev) / one_mab_d)
 
     # ------------------------------------------------------------------
     # Forward process (q) — add noise to image

@@ -397,14 +397,16 @@ class BalancedLGGDataset(Dataset):
     def _get_item_from_cache_or_disk(self, category: str, local_idx: int):
         """Helper to fetch (image, mask) raw arrays by category and local index."""
         if category == "tumor":
-            if self.cached_tumor_raw:
-                return self.cached_tumor_raw[local_idx]
-            img_path, mask_path = self.tumor_pairs[local_idx]
+            cache = self.cached_tumor_raw
+            pairs = self.tumor_pairs
         else:
-            if self.cached_bg_raw:
-                return self.cached_bg_raw[local_idx]
-            img_path, mask_path = self.background_pairs[local_idx]
+            cache = self.cached_bg_raw
+            pairs = self.background_pairs
 
+        if cache:
+            return cache[local_idx]
+
+        img_path, mask_path = pairs[local_idx]
         return _load_tif(img_path), _load_tif(mask_path)
 
     def __getitem__(self, idx: int):
@@ -485,12 +487,16 @@ def build_dataloaders(
                 filter_empty_masks=False,
             )
         print(f"  {split_name}: {len(dataset)} slices")
+
+        use_cuda = torch.cuda.is_available()
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
             shuffle=augment and not isinstance(dataset, BalancedLGGDataset),
-            num_workers=num_workers,
-            pin_memory=torch.cuda.is_available(),
+            num_workers=num_workers if augment else max(1, num_workers // 2),
+            pin_memory=use_cuda,
+            persistent_workers=use_cuda and num_workers > 0,
+            prefetch_factor=2 if num_workers > 0 else None,
             drop_last=False,
         )
         loaders[split_name] = loader

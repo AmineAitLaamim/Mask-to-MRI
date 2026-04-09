@@ -13,7 +13,7 @@ def build_ddpm_dataloaders(
     raw_dir: str,
     image_size: int = 256,
     batch_size: int = 4,
-    num_workers: int = 2,
+    num_workers: int = 4,
     seed: int = 42,
     balanced: bool = True,
     tumor_ratio: float = 0.8,
