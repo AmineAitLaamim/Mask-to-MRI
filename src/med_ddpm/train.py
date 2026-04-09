@@ -178,7 +178,14 @@ def train(
     history = []
     if resume_from and os.path.exists(resume_from):
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
-        model.load_state_dict(checkpoint["model_state_dict"])
+
+        # Handle checkpoints saved with/without torch.compile
+        model_state = checkpoint["model_state_dict"]
+        # Strip _orig_mod. prefix if present (from old compiled checkpoints)
+        if any(k.startswith("_orig_mod.") for k in model_state.keys()):
+            model_state = {k.replace("_orig_mod.", ""): v for k, v in model_state.items()}
+
+        model.load_state_dict(model_state)
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         ema.load_state_dict(checkpoint["ema_state_dict"])
         if checkpoint.get("scheduler_state_dict"):
@@ -347,9 +354,14 @@ def _save_checkpoint(
     """Save model weights, optimizer, EMA state, and scheduler state."""
     os.makedirs(checkpoint_dir, exist_ok=True)
     path = os.path.join(checkpoint_dir, f"checkpoint_{suffix}_epoch_{epoch}.pt")
+
+    # Strip _orig_mod. prefix from compiled model state dict for compatibility
+    model_state = model.state_dict()
+    model_state = {k.replace("_orig_mod.", ""): v for k, v in model_state.items()}
+
     checkpoint = {
         "epoch": epoch,
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": model_state,
         "optimizer_state_dict": optimizer.state_dict(),
         "ema_state_dict": ema.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
@@ -380,7 +392,12 @@ def load_ddpm_checkpoint(
 ) -> tuple[int, list[dict]]:
     """Load a DDPM checkpoint. Returns (epoch, history)."""
     checkpoint = torch.load(path, map_location=device, weights_only=False)
-    model.load_state_dict(checkpoint["model_state_dict"])
+
+    # Strip _orig_mod. prefix from compiled model state dict
+    model_state = checkpoint["model_state_dict"]
+    model_state = {k.replace("_orig_mod.", ""): v for k, v in model_state.items()}
+
+    model.load_state_dict(model_state)
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     if ema is not None:
