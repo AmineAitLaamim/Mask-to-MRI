@@ -41,7 +41,7 @@ med_ddpm:
   time_emb_dim: 256
   norm: group               # group (DDPM standard)
   attention_resolutions: [16]  # apply attention at 16x16
-  epochs: 200
+  epochs: 250
   batch_size: 4
   lr: 0.0001
   warmup_epochs: 5
