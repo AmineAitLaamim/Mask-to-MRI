@@ -425,9 +425,9 @@ def _save_sample_grid_ddpm(
 
     model.eval()
 
-    # Before epoch 30: use training model directly (EMA not yet converged)
-    # After epoch 30: use EMA shadow (smoother, higher quality)
-    use_ema = ema is not None and epoch >= 30
+    # Before epoch 60: use training model directly (EMA shadow lags too far)
+    # After epoch 60: use EMA shadow (smoother, higher quality)
+    use_ema = ema is not None and epoch >= 60
     if use_ema:
         ema.apply_shadow()
         print(f"  → Using EMA shadow for sampling (epoch {epoch})")
