@@ -501,7 +501,7 @@ def build_dataloaders(
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=is_train and not isinstance(dataset, BalancedLGGDataset),
+            shuffle=is_train,  # Always shuffle for training (even with BalancedLGGDataset)
             num_workers=num_workers,
             pin_memory=pin_memory,
             persistent_workers=True if num_workers > 0 else False,
