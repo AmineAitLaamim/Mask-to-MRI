@@ -119,10 +119,19 @@ def get_train_augmentation(image_size: int = 256):
 
     Uses random jitter (resize + crop) as in the original pix2pix paper.
 
-    NOTE: No RandomBrightnessContrast — MRI intensities are physically
-    meaningful (dark FLAIR = healthy tissue, bright FLAIR = edema).
-    Changing brightness destroys the T1/FLAIR/T2 contrast relationships
-    the model needs to learn.
+    ONLY geometric augmentations — NO intensity augmentations.
+    MRI pixel values carry physical meaning (dark FLAIR = healthy tissue,
+    bright FLAIR = edema). Intensity augmenting destroys the T1/FLAIR/T2
+    contrast relationships the model needs to learn.
+
+    Removed:
+    - RandomBrightnessContrast: shifts channel means randomly
+    - CLAHE: histogram equalization changes channel relationships
+    - RandomGamma: gamma changes dark channels disproportionately
+    - HueSaturationValue: hue/saturation meaningless for MRI
+    - ColorJitter: designed for natural photos, wrong for MRI
+    - GaussNoise: adds ~22 points of mean shift per channel
+    - Blur: slight smoothing OK but not worth the risk
     """
     jitter_size = 286
     return A.Compose(
@@ -132,16 +141,6 @@ def get_train_augmentation(image_size: int = 256):
             A.HorizontalFlip(p=0.5),
             A.VerticalFlip(p=0.3),
             A.RandomRotate90(p=0.5),
-            A.OneOf(
-                [
-                    A.GaussNoise(var_limit=(10.0, 50.0), p=1.0),
-                    A.Blur(blur_limit=3, p=1.0),
-                ],
-                p=0.2,
-            ),
-            # REMOVED: RandomBrightnessContrast — inappropriate for MRI data
-            # MRI pixel values carry physical meaning; random brightness
-            # destroys the T1/FLAIR/T2 contrast relationships.
         ]
     )
 
