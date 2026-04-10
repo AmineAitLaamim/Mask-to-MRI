@@ -272,30 +272,27 @@ class DDIMSampler:
         self.ddim_steps = ddim_steps
         self.eta = eta
 
-        # Subsample timesteps: uniform spacing over [0, T-1]
+        # Subsample timesteps: from T-1 down to 0
+        # e.g. for T=1000, steps=200: [999, 994, 989, ..., 4, 0]
         T = ddpm.timesteps
-        c = T // ddim_steps
-        self.ddim_timesteps = torch.arange(0, T, c, device=ddpm.betas.device)
+        step_size = T // ddim_steps
+        self.ddim_timesteps = list(reversed(range(0, T, step_size)))  # [999, ..., 0]
 
-        # Precompute DDIM coefficients
-        # alpha_bar for selected timesteps
-        self.alpha_bars = ddpm.alpha_bars[self.ddim_timesteps]
+        # alpha_bar at each selected timestep
+        ts_tensor = torch.tensor(self.ddim_timesteps, device=ddpm.betas.device)
+        self.alpha_bars = ddpm.alpha_bars[ts_tensor]
 
-        # For DDIM, at step i we go from t_i to t_{i-1} (previous DDIM timestep)
-        # alpha_bar_prev[i] = alpha_bar at the PREVIOUS DDIM timestep
-        # For i=0 (final step, t→0): we use alpha_bar[-1] = 1.0 as a placeholder
-        #   (but direction coefficient will be zero anyway)
-        alpha_bars_shifted = torch.cat([self.alpha_bars[1:], torch.ones(1, device=ddpm.betas.device)])
-        # alpha_bars_shifted[i] = alpha_bars[i+1] for i < N-1, 1.0 for i = N-1
-        # We need the OPPOSITE direction: alpha_bar_prev[i] = alpha_bar at timestep BEFORE current
-        # i.e. alpha_bar_prev[i] = alpha_bars[i-1] for i>0, and 1.0 for i=0
-        alpha_bar_prev_arr = torch.cat([torch.ones(1, device=ddpm.betas.device), self.alpha_bars[:-1]])
+        # alpha_bar_prev[i] = alpha_bar at ddim_timesteps[i+1] (next step, closer to x_0)
+        # For last step: alpha_bar_prev = 1.0 (clean image)
+        alpha_bar_prev_arr = torch.cat([
+            self.alpha_bars[1:],
+            torch.ones(1, device=ddpm.betas.device)
+        ])
         self.alpha_bars_prev = alpha_bar_prev_arr
 
-        # sigma (variance) — when eta=0, sigma=0 (deterministic)
-        alpha_t = ddpm.alphas[self.ddim_timesteps]
-        variance = (1 - self.alpha_bars_prev) / (1 - self.alpha_bars) * (1 - alpha_t)
-        self.sigma = eta * torch.sqrt(torch.clamp(variance, min=1e-20))
+        # sigma: 0 when eta=0 (fully deterministic DDIM)
+        variance = ((1 - self.alpha_bars_prev) / (1 - self.alpha_bars)) * (1 - self.alpha_bars / self.alpha_bars_prev.clamp(min=1e-8))
+        self.sigma = eta * torch.sqrt(torch.clamp(variance, min=0.0))
 
     @torch.no_grad()
     def sample(self, mask: torch.Tensor, shape: tuple[int, int, int, int] | None = None) -> torch.Tensor:
@@ -318,10 +315,10 @@ class DDIMSampler:
         # Start from pure noise
         x = torch.randn(B, C, H, W, device=mask.device)
 
-        # Reverse diffusion: step through the subsampled timesteps
-        for i in reversed(range(self.ddim_steps)):
-            t = self.ddim_timesteps[i]
-            t_batch = torch.full((B,), t.item(), device=mask.device, dtype=torch.long)
+        # Reverse diffusion: step through timesteps from high→low (index 0 = highest t)
+        for i in range(self.ddim_steps):
+            t_val = self.ddim_timesteps[i]
+            t_batch = torch.full((B,), t_val, device=mask.device, dtype=torch.long)
 
             # Predict noise
             noise_pred = self.ddpm.model(x, t_batch, mask)
@@ -337,17 +334,17 @@ class DDIMSampler:
             x_0_pred = (x - sqrt_1mab * noise_pred) / sqrt_ab
             x_0_pred = torch.clip(x_0_pred, -1.0, 1.0)
 
-            # Compute direction pointing to x_t
-            direction = torch.sqrt(1 - alpha_bar_prev - sigma ** 2) * noise_pred
+            # Direction pointing toward x_t (noise component)
+            dir_coeff = torch.clamp(1 - alpha_bar_prev - sigma ** 2, min=0.0)
+            direction = torch.sqrt(dir_coeff) * noise_pred
 
-            # Add stochastic noise (only if eta > 0)
-            if self.eta > 0 and i > 0:
-                noise = torch.randn_like(x)
-                stochastic = sigma * noise
+            # Stochastic noise (only if eta > 0 and not final step)
+            if self.eta > 0 and i < self.ddim_steps - 1:
+                stochastic = sigma * torch.randn_like(x)
             else:
-                stochastic = 0
+                stochastic = 0.0
 
-            # Compute x_{t-1}
+            # Compute x at next (less noisy) timestep
             x = torch.sqrt(alpha_bar_prev) * x_0_pred + direction + stochastic
 
         return x

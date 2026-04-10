@@ -416,12 +416,10 @@ def _save_sample_grid_ddpm(
     n_samples: int = 4,
     suffix: str = "ddpm",
     ema: EMA | None = None,
-    default_ddim_steps: int = 50,
 ):
-    """Generate a mask | fake | real grid and save as PNG using DDIM sampling."""
+    """Generate a mask | fake | real grid and save as PNG using full DDPM (1000 steps)."""
     import numpy as np
     from PIL import Image
-    from .diffusion import DDIMSampler
 
     os.makedirs(samples_dir, exist_ok=True)
 
@@ -436,16 +434,12 @@ def _save_sample_grid_ddpm(
     else:
         print(f"  → Using live model weights for sampling (epoch {epoch} < 30)")
 
-    # More DDIM steps early in training (partially trained model needs finer steps)
-    ddim_steps = 200
-    print(f"  → DDIM steps: {ddim_steps}")
-
-    ddim = DDIMSampler(ddpm, ddim_steps=ddim_steps, eta=0.0)
+    print("  → Using full DDPM sampling (1000 steps)")
 
     samples = []
     fake_std_values = []
 
-    # Grab exactly n_samples batches instead of iterating the whole loader
+    # Grab exactly n_samples batches
     with torch.no_grad():
         batches_collected = 0
         for mask, real in val_loader:
@@ -454,8 +448,8 @@ def _save_sample_grid_ddpm(
             mask = mask.to(device, non_blocking=True)
             real = real.to(device, non_blocking=True)
 
-            # Sample using fast DDIM
-            fake = ddim.sample(mask)
+            # Sample using full DDPM — 1000 steps, guaranteed correct
+            fake = ddpm.sample(mask)
             fake_std_values.append(fake.std().item())
 
             # Denormalize: [-1,1] → [0,255]
