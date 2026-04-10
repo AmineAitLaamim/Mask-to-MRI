@@ -200,23 +200,16 @@ def train(
             model_state = {k.replace("_orig_mod.", ""): v for k, v in model_state.items()}
 
         model.load_state_dict(model_state)
-
-        # DO NOT load optimizer state — it contains the old LR from a different config
-        # Instead, let optimizer start fresh with the current config LR
-        # (momentum is reset, but correct LR is far more important)
-
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         ema.load_state_dict(checkpoint["ema_state_dict"])
+        if checkpoint.get("scheduler_state_dict"):
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-        # DO NOT load scheduler state — it's tied to the old config (different epochs/lr)
-        # Instead, manually step the scheduler to the correct position
         start_epoch = checkpoint["epoch"]
-        for _ in range(start_epoch):
-            scheduler.step()
-
+        history = checkpoint.get("history", [])
         current_lr = scheduler.get_last_lr()[0]
         print(f"  → Resumed from checkpoint: {resume_from} (epoch {start_epoch})")
-        print(f"  → LR at resume position: {current_lr:.6f}")
-        history = checkpoint.get("history", [])
+        print(f"  → LR restored to: {current_lr:.6f}")
 
     # torch.compile (PyTorch 2.0+) — apply AFTER checkpoint loading
     if use_compile and hasattr(torch, "compile"):
