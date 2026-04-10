@@ -45,5 +45,5 @@ med_ddpm:
   batch_size: 4
   lr: 0.0001
   warmup_epochs: 5
-  ema_decay: 0.995
+  ema_decay: 0.99   # was 0.995 — tracks live model more closely
   save_every: 10
