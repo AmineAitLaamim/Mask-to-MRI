@@ -118,6 +118,8 @@ def get_train_augmentation(image_size: int = 256):
     """Albumentations augmentation for training data.
 
     Uses random jitter (resize + crop) as in the original pix2pix paper.
+    Intensity augmentations (brightness/CLAHE) are reduced to avoid
+    shifting normalized [-1, 1] channel means.
     """
     jitter_size = 286
     return A.Compose(
@@ -134,12 +136,13 @@ def get_train_augmentation(image_size: int = 256):
                 ],
                 p=0.2,
             ),
+            # Reduced brightness/CLAHE probability to avoid channel mean shift
             A.OneOf(
                 [
-                    A.RandomBrightnessContrast(p=1.0),
-                    A.CLAHE(p=1.0),
+                    A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=1.0),
+                    A.CLAHE(clip_limit=2.0, p=1.0),
                 ],
-                p=0.3,
+                p=0.15,
             ),
         ]
     )
