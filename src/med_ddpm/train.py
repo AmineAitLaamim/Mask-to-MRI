@@ -202,9 +202,11 @@ def train(
         model.load_state_dict(model_state)
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         ema.load_state_dict(checkpoint["ema_state_dict"])
-        if checkpoint.get("scheduler_state_dict"):
-            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        # DO NOT load scheduler state — it's tied to the old config (different epochs/lr)
+        # Instead, manually step the scheduler to the correct position
         start_epoch = checkpoint["epoch"]
+        for _ in range(start_epoch):
+            scheduler.step()
         history = checkpoint.get("history", [])
         print(f"  → Resumed from checkpoint: {resume_from} (epoch {start_epoch})")
 
@@ -434,7 +436,7 @@ def _save_sample_grid_ddpm(
         print(f"  → Using live model weights for sampling (epoch {epoch} < 30)")
 
     # More DDIM steps early in training (partially trained model needs finer steps)
-    ddim_steps = 200 if epoch < 50 else default_ddim_steps
+    ddim_steps = 200
     print(f"  → DDIM steps: {ddim_steps}")
 
     ddim = DDIMSampler(ddpm, ddim_steps=ddim_steps, eta=0.0)
