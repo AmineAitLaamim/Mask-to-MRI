@@ -172,6 +172,8 @@ class DDPM(nn.Module):
         sqrt_1mab = self._gather(self.sqrt_one_minus_alpha_bars, t)
         x_0_pred = (x_t - sqrt_1mab * noise_pred) / sqrt_ab
         x_0_pred = torch.clip(x_0_pred, -1.0, 1.0)  # Clip to valid range
+        # Prevent channel drift accumulation during denoising
+        x_0_pred = x_0_pred - x_0_pred.mean(dim=[2, 3], keepdim=True) * 0.1
 
         # Compute mean of posterior
         coef1 = self._gather(self.posterior_mean_coef1, t)

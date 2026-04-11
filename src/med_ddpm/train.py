@@ -37,6 +37,7 @@ class EMA:
         self.model = model
         self.decay = decay
         self.shadow = {name: param.data.clone() for name, param in model.named_parameters()}
+        self._backup = None  # stores live params before apply_shadow, for restore
 
     def update(self):
         """Update shadow parameters towards current model."""
@@ -45,15 +46,19 @@ class EMA:
                 self.shadow[name].lerp_(param.data, 1.0 - self.decay)
 
     def apply_shadow(self):
-        """Copy shadow parameters into model (for evaluation/sampling)."""
+        """Save live params, then copy shadow into model (for evaluation/sampling)."""
+        self._backup = {name: param.data.clone() for name, param in self.model.named_parameters() if name in self.shadow}
         for name, param in self.model.named_parameters():
             if name in self.shadow:
                 param.data.copy_(self.shadow[name])
 
     def restore(self):
-        """Restore original model parameters (if needed)."""
-        # In practice, we keep using the shadow for sampling
-        pass
+        """Restore original live model parameters after sampling."""
+        if self._backup is not None:
+            for name, param in self.model.named_parameters():
+                if name in self._backup:
+                    param.data.copy_(self._backup[name])
+            self._backup = None
 
     def state_dict(self) -> dict:
         return {k: v.clone() for k, v in self.shadow.items()}
@@ -185,7 +190,7 @@ def train(
 
     # EMA (created before checkpoint loading so we can restore its state)
     ema_decay_early = 0.9
-    ema_decay_late = 0.999
+    ema_decay_late = ema_decay  # use config value (default 0.995) instead of hardcoded 0.999
     ema = EMA(model, decay=ema_decay_early)
 
     # Resume from checkpoint BEFORE compiling
@@ -432,7 +437,7 @@ def _save_sample_grid_ddpm(
         ema.apply_shadow()
         print(f"  → Using EMA shadow for sampling (epoch {epoch})")
     else:
-        print(f"  → Using live model weights for sampling (epoch {epoch} < 30)")
+        print(f"  → Using live model weights for sampling (epoch {epoch} < 100)")
 
     print("  → Using full DDPM sampling (1000 steps)")
 
@@ -487,6 +492,10 @@ def _save_sample_grid_ddpm(
     path = os.path.join(samples_dir, f"{suffix}_samples_epoch_{epoch}.png")
     img.save(path)
     print(f"  → Saved DDPM sample grid: {path}")
+
+    # Restore live model weights after sampling (EMA shadow was copied in above)
+    if use_ema:
+        ema.restore()
 
 
 # ---------------------------------------------------------------------------
