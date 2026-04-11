@@ -59,27 +59,27 @@ class TrainingMasksDataset(Dataset):
 
         patient_data = get_patient_file_list(raw_dir)
         splits = patient_level_split(patient_data, seed=seed)
-        train_pairs = splits["train"]
+        train_pairs = splits["train"]  # list of (img_path, mask_path) tuples
 
         # Create a temporary dataset to load masks
         self.dataset = LGGDataset(train_pairs, image_size=image_size, augment=False)
-        self.masks = []
+        self.pairs = []  # store (mask_tensor, stem)
         self.stems = []
 
         # Collect only tumor-containing masks
         for idx in range(len(self.dataset)):
             mask, mri = self.dataset[idx]
             if (mask > 0).any():  # Has tumor
-                self.masks.append(mask)
-                pair = train_pairs[idx]
-                stem = Path(pair["mask_path"]).stem
+                self.pairs.append(mask)
+                _, mask_path = train_pairs[idx]
+                stem = Path(mask_path).stem.replace("_mask", "")
                 self.stems.append(stem)
 
     def __len__(self) -> int:
-        return len(self.masks)
+        return len(self.pairs)
 
     def __getitem__(self, idx: int):
-        return self.masks[idx], self.stems[idx]
+        return self.pairs[idx], self.stems[idx]
 
 
 # ---------------------------------------------------------------------------
