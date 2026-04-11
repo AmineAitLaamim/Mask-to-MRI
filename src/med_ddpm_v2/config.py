@@ -38,10 +38,10 @@ CONFIG = {
     "dropout": 0.0,
 
     # ── Diffusion ─────────────────────────────────────────────────────
-    "timesteps": 250,            # original uses 250 (not 1000)
+    "timesteps": 1000,           # full noise schedule (original paper)
     "beta_schedule": "cosine",   # cosine schedule (original)
     "loss_type": "l1",           # L1 loss (original — sharper samples)
-    "ddim_steps": 250,           # DDIM fast sampling
+    "ddim_steps": 250,           # DDIM fast sampling (250 << 1000)
 
     # ── Training ──────────────────────────────────────────────────────
     "epochs": 200,
