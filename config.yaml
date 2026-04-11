@@ -36,7 +36,7 @@ med_ddpm:
   timesteps: 1000
   beta_start: 0.0001
   beta_end: 0.02
-  schedule: linear          # linear | cosine
+  schedule: cosine          # cosine — better for medical images (Med-DDPM paper)
   num_filters: 64
   time_emb_dim: 256
   norm: group               # group (DDPM standard)

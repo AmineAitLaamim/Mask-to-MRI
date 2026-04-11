@@ -177,7 +177,7 @@ def train(
                 optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_epochs,
             ),
             torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=epochs - warmup_epochs,
+                optimizer, T_max=epochs - warmup_epochs, eta_min=1e-5,
             ),
         ],
         milestones=[warmup_epochs],
