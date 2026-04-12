@@ -674,7 +674,10 @@ class GaussianDiffusion(nn.Module):
         """Full reverse diffusion loop: from noise to image."""
         device = self.betas.device
         b = shape[0]
-        img = torch.randn(shape, device=device)
+        # Correlated noise: same spatial pattern across all channels
+        # Prevents each channel from diverging independently
+        noise_1ch = torch.randn(b, 1, shape[2], shape[3], device=device)
+        img = noise_1ch.expand(b, shape[1], shape[2], shape[3]).clone()
 
         for i in tqdm_wrapper(reversed(range(0, self.num_timesteps)),
                                desc="sampling loop time step", total=self.num_timesteps):
@@ -711,7 +714,9 @@ class GaussianDiffusion(nn.Module):
         times = list(reversed(times.int().tolist()))
         time_pairs = list(zip(times[:-1], times[1:]))  # [(T-1, T-2), ..., (0, -1)]
 
-        img = torch.randn(shape, device=device)
+        # Correlated noise: same spatial pattern across all channels
+        noise_1ch = torch.randn(shape[0], 1, shape[2], shape[3], device=device)
+        img = noise_1ch.expand(shape[0], shape[1], shape[2], shape[3]).clone()
 
         for time, time_next in time_pairs:
             time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
