@@ -328,13 +328,29 @@ def train(
     print(f"  Checkpoint every {save_every} epochs")
     print()
 
+    # Track loss history for spike detection
+    _recent_losses = []
+
     for epoch in range(start_epoch + 1, epochs + 1):
         model.train()
         ema_model.eval()
         epoch_loss = 0.0
         n_batches = 0
+        _batch_losses = []
 
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=False)
+        print(f"\n{'='*60}", flush=True)
+        print(f"EPOCH {epoch}/{epochs}  |  LR: {scheduler.get_last_lr()[0]:.6f}  |  step: {global_step}", flush=True)
+        print(f"{'='*60}", flush=True)
+
+        # ── GPU memory at epoch start ──────────────────────────────────
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                alloc = torch.cuda.memory_allocated(i) / 1e9
+                reserv = torch.cuda.memory_reserved(i) / 1e9
+                total = torch.cuda.get_device_properties(i).total_memory / 1e9
+                print(f"  [GPU {i}] {alloc:.1f}GB alloc | {reserv:.1f}GB reserved | {total:.1f}GB total", flush=True)
+
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}", leave=True, dynamic_ncols=True)
         for mask_batch, mri_batch in pbar:
             mask_batch = mask_batch.to(device, non_blocking=True)
             mri_batch = mri_batch.to(device, non_blocking=True)
@@ -348,21 +364,33 @@ def train(
                     loss = loss.mean()  # DataParallel returns per-GPU losses
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss = model(mri_batch, mask_batch)
                 loss = loss.mean()  # DataParallel returns per-GPU losses
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
                 optimizer.step()
 
-            epoch_loss += loss.item()
+            loss_val = loss.item()
+            epoch_loss += loss_val
             n_batches += 1
             global_step += 1
+            _batch_losses.append(loss_val)
 
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            pbar.set_postfix({
+                "loss": f"{loss_val:.4f}",
+                "grad": f"{grad_norm:.2f}",
+                "step": global_step,
+            })
+
+            # ── Warn on NaN/Inf loss ──────────────────────────────────
+            if loss_val != loss_val or loss_val == float("inf"):
+                print(f"\n  ⚠️  [step {global_step}] NaN/Inf loss detected! loss={loss_val}", flush=True)
+                print(f"      mri  range: [{mri_batch.min():.3f}, {mri_batch.max():.3f}]", flush=True)
+                print(f"      mask range: [{mask_batch.min():.3f}, {mask_batch.max():.3f}]", flush=True)
 
             # ── EMA update ────────────────────────────────────────────────
             if global_step >= step_start_ema and global_step % update_ema_every == 0:
@@ -374,6 +402,26 @@ def train(
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
 
+        # ── Epoch summary ─────────────────────────────────────────────
+        loss_min = min(_batch_losses)
+        loss_max = max(_batch_losses)
+        _recent_losses.append(avg_loss)
+
+        # Detect loss spike (current epoch >2x previous avg)
+        spike_warning = ""
+        if len(_recent_losses) >= 2 and avg_loss > 2.0 * _recent_losses[-2]:
+            spike_warning = "  ⚠️  LOSS SPIKE"
+
+        # Detect loss plateau (last 10 epochs within 0.5%)
+        plateau_warning = ""
+        if len(_recent_losses) >= 10:
+            recent_10 = _recent_losses[-10:]
+            if (max(recent_10) - min(recent_10)) / (min(recent_10) + 1e-8) < 0.005:
+                plateau_warning = "  ⚠️  PLATEAU DETECTED"
+
+        # AMP scaler scale factor (useful to detect underflow)
+        scaler_scale = f"{scaler.get_scale():.0f}" if scaler is not None else "N/A"
+
         # ── Validation + logging at checkpoint intervals ──────────────
         if epoch % save_every == 0 or epoch == epochs:
             val_loss = _evaluate_val_loss(val_loader, model, device)
@@ -383,14 +431,25 @@ def train(
                 "val_loss": val_loss,
                 "lr": current_lr,
             }
-            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f} | LR: {current_lr:.6f}")
+            overfit = ""
+            if val_loss > avg_loss * 1.3:
+                overfit = "  ⚠️  OVERFIT?"
+            print(f"\n  Loss:     avg={avg_loss:.4f}  min={loss_min:.4f}  max={loss_max:.4f}{spike_warning}", flush=True)
+            print(f"  Val Loss: {val_loss:.4f}{overfit}", flush=True)
+            print(f"  LR:       {current_lr:.6f}", flush=True)
+            print(f"  GradNorm: {grad_norm:.3f} (clip={grad_clip})", flush=True)
+            print(f"  AMP scale:{scaler_scale}", flush=True)
+            print(f"  EMA active: {global_step >= step_start_ema}{plateau_warning}", flush=True)
         else:
             epoch_record = {
                 "epoch": epoch,
                 "loss": avg_loss,
                 "lr": current_lr,
             }
-            print(f"Epoch {epoch}/{epochs} | Loss: {avg_loss:.4f} | LR: {current_lr:.6f}")
+            print(f"\n  Loss:     avg={avg_loss:.4f}  min={loss_min:.4f}  max={loss_max:.4f}{spike_warning}", flush=True)
+            print(f"  LR:       {current_lr:.6f}", flush=True)
+            print(f"  GradNorm: {grad_norm:.3f} (clip={grad_clip})", flush=True)
+            print(f"  AMP scale:{scaler_scale}{plateau_warning}", flush=True)
 
         history.append(epoch_record)
 
@@ -430,5 +489,3 @@ def _save_metrics(history: list[dict], save_path: str):
     serializable = [{k: float(v) for k, v in h.items()} for h in history]
     with open(save_path, "w") as f:
         json.dump(serializable, f, indent=2)
-
-# fix
