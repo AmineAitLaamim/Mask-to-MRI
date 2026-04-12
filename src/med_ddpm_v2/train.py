@@ -58,26 +58,15 @@ def _save_checkpoint(
     checkpoint_dir: str,
     suffix: str = "v2",
 ):
-    """Save all training states to checkpoint file. Keeps only the latest."""
-    import glob as _glob
+    """Save all training states to checkpoint file."""
     os.makedirs(checkpoint_dir, exist_ok=True)
-
-    # Delete previous checkpoint (keep only last)
-    for old in _glob.glob(os.path.join(checkpoint_dir, f"checkpoint_{suffix}_epoch_*.pt")):
-        os.remove(old)
-        print(f"  Deleted old checkpoint: {Path(old).name}")
-
     path = os.path.join(checkpoint_dir, f"checkpoint_{suffix}_epoch_{epoch}.pt")
-
-    # Unwrap DataParallel if needed
-    raw_model = diffusion_model.module if isinstance(diffusion_model, nn.DataParallel) else diffusion_model
-    raw_ema   = ema_model.module if isinstance(ema_model, nn.DataParallel) else ema_model
 
     checkpoint = {
         "epoch": epoch,
         "global_step": global_step,
-        "model_state_dict": raw_model.state_dict(),
-        "ema_state_dict": raw_ema.state_dict(),
+        "model_state_dict": diffusion_model.state_dict(),
+        "ema_state_dict": ema_model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "scheduler_state_dict": scheduler.state_dict() if scheduler else None,
         "history": history,
@@ -299,15 +288,6 @@ def train(
     for p in ema_model.parameters():
         p.requires_grad = False
 
-    # ── Multi-GPU (DataParallel) ───────────────────────────────────────
-    n_gpus = torch.cuda.device_count()
-    if n_gpus > 1:
-        print(f"  Using {n_gpus} GPUs via DataParallel")
-        model = nn.DataParallel(model)
-        ema_model = nn.DataParallel(ema_model)
-    else:
-        print(f"  Using single GPU")
-
     # ── AMP GradScaler ────────────────────────────────────────────────
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" and config.get("amp", True) else None
     if scaler is not None:
@@ -365,6 +345,7 @@ def train(
             if scaler is not None:
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
                     loss = model(mri_batch, mask_batch)
+                    loss = loss.mean()  # DataParallel returns per-GPU losses
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
@@ -372,6 +353,7 @@ def train(
                 scaler.update()
             else:
                 loss = model(mri_batch, mask_batch)
+                loss = loss.mean()  # DataParallel returns per-GPU losses
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
                 optimizer.step()
@@ -384,10 +366,8 @@ def train(
 
             # ── EMA update ────────────────────────────────────────────────
             if global_step >= step_start_ema and global_step % update_ema_every == 0:
-                _live = model.module if isinstance(model, nn.DataParallel) else model
-                _ema  = ema_model.module if isinstance(ema_model, nn.DataParallel) else ema_model
                 with torch.no_grad():
-                    for ema_p, live_p in zip(_ema.parameters(), _live.parameters()):
+                    for ema_p, live_p in zip(ema_model.parameters(), model.parameters()):
                         ema_p.data.mul_(ema_decay).add_(live_p.data, alpha=1.0 - ema_decay)
 
         avg_loss = epoch_loss / n_batches
