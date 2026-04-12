@@ -7,17 +7,25 @@ Adapted from 3D → 2D, using original paper's architecture.
 
 import os
 
-# Detect Colab vs local
-_IS_COLAB = os.path.exists("/content")
+# Detect Colab vs Kaggle vs local
+_IS_COLAB  = os.path.exists("/content")
+_IS_KAGGLE = os.path.exists("/kaggle")
 
-if _IS_COLAB:
+if _IS_KAGGLE:
+    _OUTPUTS_BASE = "/kaggle/working/outputs_v2"
+    _DRIVE_BASE   = None
+    _RAW_DIR      = "/kaggle/input/lgg-mri-segmentation/lgg-mri-segmentation"
+    _BATCH_SIZE   = 16
+elif _IS_COLAB:
     _OUTPUTS_BASE = "/content/Mask-to-MRI/outputs_v2"
     _DRIVE_BASE = "/content/drive/MyDrive/mask-to-mri/outputs_v2"
     _RAW_DIR = "dataset/lgg-mri-segmentation"
+    _BATCH_SIZE = 4
 else:
     _OUTPUTS_BASE = "outputs_v2"
     _DRIVE_BASE = None  # Drive sync disabled on non-Colab
     _RAW_DIR = "dataset/lgg-mri-segmentation"
+    _BATCH_SIZE = 4
 
 CONFIG = {
     # ── Data ──────────────────────────────────────────────────────────
@@ -45,7 +53,7 @@ CONFIG = {
 
     # ── Training ──────────────────────────────────────────────────────
     "epochs": 200,
-    "batch_size": 4,
+    "batch_size": _BATCH_SIZE,
     "lr": 1e-4,
     "warmup_epochs": 5,
     "ema_decay": 0.995,
