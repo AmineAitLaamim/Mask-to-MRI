@@ -118,15 +118,15 @@ def _save_sample_grid(
             fake = sampling_model.sample(mask, ddim_steps=ddim_steps)
             fake_std_values.append(fake.std().item())
 
-            # Debug: channel means
+            # Debug: FLAIR channel stats
             if batches_collected == 0:
-                print(f"  [DEBUG] fake channel means: R={fake[0,0].mean():.3f}, G={fake[0,1].mean():.3f}, B={fake[0,2].mean():.3f}")
-                print(f"  [DEBUG] real channel means: R={real[0,0].mean():.3f}, G={real[0,1].mean():.3f}, B={real[0,2].mean():.3f}")
+                print(f"  [DEBUG] fake FLAIR mean: {fake[0,0].mean():.3f}, std: {fake[0,0].std():.3f}")
+                print(f"  [DEBUG] real FLAIR mean: {real[0,0].mean():.3f}, std: {real[0,0].std():.3f}")
 
-            # Denormalize: [-1,1] → [0,255]
+            # Denormalize: [-1,1] → [0,255] — single channel grayscale
             mask_np = ((mask[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
-            real_np = ((real[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
-            fake_np = ((fake[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+            real_np = ((real[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+            fake_np = ((fake[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
 
             samples.append((mask_np, fake_np, real_np))
             batches_collected += 1

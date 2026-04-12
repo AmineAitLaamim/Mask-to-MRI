@@ -162,13 +162,18 @@ def generate_synthetic(
         with torch.no_grad():
             fake = model.sample(mask, ddim_steps=ddim_steps)
 
-        # Denormalize: [-1,1] → [0,255]
-        fake_np = ((fake[0].cpu().permute(1, 2, 0).numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+        # Denormalize: [-1,1] → [0,255] — single channel grayscale
+        fake_np = ((fake[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
         mask_np = ((mask[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
 
-        # Save synthetic MRI
-        fake_path = os.path.join(output_dir, f"{stem}_synthetic.png")
-        Image.fromarray(fake_np).save(fake_path)
+        # Save synthetic FLAIR as grayscale (single channel)
+        fake_gray_path = os.path.join(output_dir, f"{stem}_synthetic_flair.png")
+        Image.fromarray(fake_np, mode='L').save(fake_gray_path)
+
+        # Save as 3-channel RGB (FLAIR copied to all channels) for experiment B compatibility
+        fake_rgb = np.stack([fake_np, fake_np, fake_np], axis=-1)
+        fake_rgb_path = os.path.join(output_dir, f"{stem}_synthetic.png")
+        Image.fromarray(fake_rgb).save(fake_rgb_path)
 
         # Save mask
         mask_path = os.path.join(output_dir, f"{stem}_mask.png")

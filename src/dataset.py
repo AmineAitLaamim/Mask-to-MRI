@@ -14,7 +14,7 @@ import albumentations as A
 import numpy as np
 import tifffile
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 
 # ---------------------------------------------------------------------------
@@ -502,6 +502,99 @@ def build_dataloaders(
             dataset,
             batch_size=batch_size,
             shuffle=is_train,  # Always shuffle for training (even with BalancedLGGDataset)
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=True if num_workers > 0 else False,
+            prefetch_factor=4 if num_workers > 0 else None,
+            drop_last=is_train,
+        )
+        loaders[split_name] = loader
+
+    return loaders
+
+
+# ---------------------------------------------------------------------------
+# FLAIR-only dataset wrapper — single-channel for DDPM v2
+# ---------------------------------------------------------------------------
+
+class FLAIRDataset(Dataset):
+    """
+    Wraps LGGDataset or BalancedLGGDataset to return single-channel FLAIR only.
+
+    FLAIR is channel index 1 (G channel) in the RGB .tif files.
+    It shows the highest tumor contrast for LGG segmentation.
+
+    Returns:
+        mask_tensor:  (1, H, W) normalized [-1, 1]
+        flair_tensor: (1, H, W) normalized [-1, 1]
+    """
+
+    def __init__(self, base_dataset: Dataset):
+        self.base = base_dataset
+
+    def __len__(self) -> int:
+        return len(self.base)
+
+    def __getitem__(self, idx: int):
+        mask, mri = self.base[idx]  # mri shape: (3, H, W)
+        flair = mri[[1]]            # extract channel 1 (FLAIR/G), shape: (1, H, W)
+        return mask, flair
+
+
+def build_flair_dataloaders(
+    raw_dir: str,
+    image_size: int = 256,
+    batch_size: int = 4,
+    num_workers: int = 4,
+    seed: int = 42,
+    balanced: bool = True,
+    tumor_ratio: float = 0.8,
+) -> dict[str, DataLoader]:
+    """
+    Same as build_dataloaders but returns single-channel FLAIR instead of 3-channel MRI.
+    Used for DDPM v2 single-channel training.
+    """
+    import os
+
+    patient_data = get_patient_file_list(raw_dir)
+    splits = patient_level_split(patient_data, seed=seed)
+
+    max_workers = os.cpu_count() or 2
+    num_workers = min(num_workers, max_workers)
+
+    use_cuda = torch.cuda.is_available()
+    pin_memory = use_cuda
+
+    loaders = {}
+    for split_name, pairs in splits.items():
+        augment = split_name == "train"
+        if split_name == "train" and balanced:
+            base_dataset = BalancedLGGDataset(
+                pairs,
+                image_size=image_size,
+                augment=augment,
+                tumor_ratio=tumor_ratio,
+                seed=seed,
+            )
+            base_dataset.set_epoch(seed=seed)
+        else:
+            base_dataset = LGGDataset(
+                pairs,
+                image_size=image_size,
+                augment=augment,
+                seed=seed,
+                filter_empty_masks=False,
+            )
+
+        # Wrap with FLAIRDataset to extract single channel
+        dataset = FLAIRDataset(base_dataset)
+        print(f"  {split_name}: {len(dataset)} slices (FLAIR only)")
+
+        is_train = split_name == "train"
+        loader = DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=is_train,
             num_workers=num_workers,
             pin_memory=pin_memory,
             persistent_workers=True if num_workers > 0 else False,

@@ -29,8 +29,8 @@ CONFIG = {
     # ── Model (matches original Med-DDPM architecture, adapted 3D→2D) ─
     "num_channels": 64,          # base model channels
     "num_res_blocks": 1,         # 1 residual block per level (original)
-    "in_channels": 4,            # noisy_mri(3) + mask(1) concatenated
-    "out_channels": 3,           # predicted noise ε
+    "in_channels": 2,            # noisy_flair(1) + mask(1)
+    "out_channels": 1,           # predicted noise for FLAIR only
     "attention_resolutions": "16",  # attention at 256//16 = 16×16 spatial
     "num_heads": 4,              # attention heads (original)
     "use_scale_shift_norm": False,
