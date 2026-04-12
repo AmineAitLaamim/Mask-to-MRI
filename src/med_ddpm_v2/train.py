@@ -12,7 +12,6 @@ Features:
 
 import os
 import json
-import copy
 import shutil
 from pathlib import Path
 
@@ -281,8 +280,10 @@ def train(
         milestones=[warmup_epochs],
     )
 
-    # ── EMA model (copy.deepcopy — original Med-DDPM approach) ────────
-    ema_model = copy.deepcopy(model)
+    # ── EMA model (state_dict copy — lower memory than deepcopy) ──────
+    ema_model = ConditionalDDPM(config)
+    ema_model.load_state_dict(model.state_dict())
+    ema_model = ema_model.to(device)
     ema_model.eval()
     # Freeze EMA model parameters (they are only updated via EMA)
     for p in ema_model.parameters():
