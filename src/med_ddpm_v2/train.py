@@ -143,12 +143,11 @@ def _save_sample_grid(
     # Build grid: 3 columns × n_samples rows (mask | fake | real)
     rows = []
     for mask_np, fake_np, real_np in samples:
-        mask_3ch = np.stack([mask_np] * 3, axis=-1)
-        row = np.concatenate([mask_3ch, fake_np, real_np], axis=1)
+        row = np.concatenate([mask_np, fake_np, real_np], axis=1)
         rows.append(row)
 
     grid = np.concatenate(rows, axis=0)
-    img = Image.fromarray(grid)
+    img = Image.fromarray(grid, mode='L')
     path = os.path.join(samples_dir, f"{suffix}_samples_epoch_{epoch}.png")
     img.save(path)
     print(f"  Saved sample grid: {path}")
