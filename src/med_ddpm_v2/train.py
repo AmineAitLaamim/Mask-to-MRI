@@ -361,6 +361,7 @@ def train(
             if scaler is not None:
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
                     loss = model(mri_batch, mask_batch)
+                if loss.ndim > 0:
                     loss = loss.mean()  # DataParallel returns per-GPU losses
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -369,7 +370,8 @@ def train(
                 scaler.update()
             else:
                 loss = model(mri_batch, mask_batch)
-                loss = loss.mean()  # DataParallel returns per-GPU losses
+                if loss.ndim > 0:
+                    loss = loss.mean()  # DataParallel returns per-GPU losses
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
                 optimizer.step()
