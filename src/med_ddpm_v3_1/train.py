@@ -326,6 +326,11 @@ def train(
     if resume_from is None:
         resume_from = config.get("resume_from")
 
+    if resume_from is not None and not os.path.exists(resume_from):
+        print(f"  ⚠️  WARNING: resume_from file not found: {resume_from}")
+        print(f"      Starting from scratch instead.")
+        resume_from = None
+
     if resume_from and os.path.exists(resume_from):
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -391,7 +396,13 @@ def train(
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
                     loss = model(mri_batch, mask_batch)
                 if loss.ndim > 0:
-                    loss = loss.mean()  # DataParallel returns per-GPU losses
+                    loss = loss.mean()
+                # ── Check for NaN/Inf BEFORE backward to prevent weight corruption ──
+                loss_val = loss.item()
+                if loss_val != loss_val or loss_val == float("inf"):
+                    print(f"\n  ⚠️  [step {global_step}] NaN/Inf loss={loss_val}, skipping batch", flush=True)
+                    global_step += 1
+                    continue
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
@@ -400,21 +411,18 @@ def train(
             else:
                 loss = model(mri_batch, mask_batch)
                 if loss.ndim > 0:
-                    loss = loss.mean()  # DataParallel returns per-GPU losses
+                    loss = loss.mean()
+                # ── Check for NaN/Inf BEFORE backward ──
+                loss_val = loss.item()
+                if loss_val != loss_val or loss_val == float("inf"):
+                    print(f"\n  ⚠️  [step {global_step}] NaN/Inf loss={loss_val}, skipping batch", flush=True)
+                    global_step += 1
+                    continue
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
                 optimizer.step()
 
             loss_val = loss.item()
-
-            # ── Warn on NaN/Inf loss — skip this batch to prevent corruption ──
-            if loss_val != loss_val or loss_val == float("inf"):
-                print(f"\n  ⚠️  [step {global_step}] NaN/Inf loss detected! loss={loss_val}, skipping batch", flush=True)
-                print(f"      mri  range: [{mri_batch.min():.3f}, {mri_batch.max():.3f}]", flush=True)
-                print(f"      mask range: [{mask_batch.min():.3f}, {mask_batch.max():.3f}]", flush=True)
-                global_step += 1
-                continue
-
             epoch_loss += loss_val
             n_batches += 1
             global_step += 1

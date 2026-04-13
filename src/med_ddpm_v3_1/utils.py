@@ -1,6 +1,9 @@
 """v3_1 utilities: merge all splits into one training dataset."""
 
 import os
+import shutil
+from pathlib import Path
+
 import torch
 from torch.utils.data import DataLoader, Dataset, ConcatDataset
 
@@ -11,6 +14,20 @@ from src.dataset import (
     LGGDataset,
     FLAIRDataset,
 )
+
+
+def _sync_to_drive(local_path: str, drive_base: str | None) -> None:
+    """Copy a file from local outputs_v3_1 to Google Drive mirror."""
+    if drive_base is None:
+        return
+    try:
+        outputs_base = "/content/Mask-to-MRI/outputs_v3_1"
+        rel = Path(local_path).relative_to(outputs_base)
+        drive_path = Path(drive_base) / rel
+        drive_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(local_path, drive_path)
+    except Exception as e:
+        print(f"  Drive sync failed: {e}")
 
 
 def build_all_data_flair_loader(
