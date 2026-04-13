@@ -4,7 +4,8 @@
 Architecture:
   - U-Net noise predictor with ResBlocks, attention, timestep embeddings
   - Gaussian diffusion with cosine noise schedule
-  - Mask conditioning via channel-wise concatenation: x_noisy(3) + mask(1) → 4 channels
+  - Mask conditioning via channel-wise concatenation: x_noisy(1) + mask(1) → 2 channels
+  - Single-channel FLAIR output
 
 Original 3D→2D changes:
   - Conv3d → Conv2d, AvgPool3d → AvgPool2d, interpolate 3D → 2D
@@ -366,11 +367,11 @@ class UNetModel(nn.Module):
     Adapted from original Med-DDPM:
       - dims=3 → dims=2 (all Conv3d → Conv2d, Pool3d → Pool2d)
       - Removed depth_size, removed 3D interpolation
-      - in_channels = 4 (3 MRI + 1 mask concatenated)
-      - out_channels = 3 (predicted noise ε)
+      - in_channels = 2 (1 noisy FLAIR + 1 mask concatenated)
+      - out_channels = 1 (predicted noise ε)
 
-    Input: (B, 4, H, W) — noisy_mri + mask concatenated
-    Output: (B, 3, H, W) — predicted noise
+    Input: (B, 2, H, W) — noisy_flair + mask concatenated
+    Output: (B, 1, H, W) — predicted noise
     """
 
     def __init__(
@@ -521,7 +522,7 @@ class UNetModel(nn.Module):
         Apply the model to an input batch.
 
         Args:
-            x: (B, 4, H, W) — noisy_mri(3) + mask(1) concatenated
+            x: (B, 2, H, W) — noisy_flair(1) + mask(1) concatenated
             timesteps: (B,) — integer timesteps
             y: optional class labels (not used for our conditional generation)
         """
