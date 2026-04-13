@@ -195,7 +195,77 @@ pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{epochs}",
 
 ---
 
-### 3.5 TF32 Auto-Enable
+### 3.8 32×32 Multi-Scale Attention
+
+**Problem:** Attention only at 16×16 spatial resolution misses global structure patterns.
+
+**Solution:** Add attention at both 16×16 and 32×32 spatial scales:
+
+```python
+"attention_resolutions": "16,32",
+```
+
+**Result:** Model learns both local (16×16) and global (32×32) spatial dependencies. Better structural coherence in generated images.
+
+---
+
+### 3.9 SSIM Validation Metric
+
+**Problem:** Validation loss (L1 noise prediction error) doesn't correlate well with sample quality.
+
+**Solution:** Compute SSIM on EMA model samples every checkpoint using fast 50-step DDIM:
+
+```python
+val_ssim = _compute_val_ssim(ema_model, val_loader, device, n_batches=4, ddim_steps=50)
+```
+
+**Implementation:** Samples 4 batches from val loader, computes SSIM between generated and real FLAIR, averages across batches.
+
+**Cost:** Adds ~3-4 minutes to each checkpoint epoch (every 10 epochs).
+
+**Benefit:** Direct quality metric tracked in training history JSON.
+
+---
+
+### 3.10 EMA Model `cfg_drop_prob` Propagation
+
+**Problem:** EMA model created separately didn't inherit `cfg_drop_prob` attribute.
+
+**Solution:** Explicitly propagate after EMA creation:
+
+```python
+ema_model.diffusion.cfg_drop_prob = model.diffusion.cfg_drop_prob
+```
+
+**Result:** EMA model can use CFG sampling at inference time without missing attribute errors.
+
+---
+
+### 3.11 Extracted `_sync_to_drive` to Shared `utils.py`
+
+**Problem:** Drive sync helper was duplicated in both `train.py` and `sample.py`.
+
+**Solution:** Extracted to `src/med_ddpm_v3/utils.py` and imported by both files.
+
+**Result:** Single source of truth, easier to maintain.
+
+---
+
+### 3.12 Min-SNR Weighting (Cleaned Up)
+
+**Implementation:** Uses `clamp(snr, max=gamma)/snr` with epsilon:
+
+```python
+snr = alpha_bar_t / (1 - alpha_bar_t + 1e-8)  # +epsilon prevents div-by-zero
+weight = torch.clamp(snr, max=gamma) / snr
+loss = (loss * weight).mean()
+```
+
+**Why epsilon:** At t ≈ 999, `alpha_bar_t → 0`, so `snr → 0` and `weight = clamp(snr, max=gamma) / snr` could divide by zero. The `+1e-8` ensures numerical stability in AMP float16 path.
+
+---
+
+### 3.13 TF32 Auto-Enable
 
 **Problem:** T4 and A100 GPUs support TensorFloat-32 (TF32) for faster matrix multiplication, but PyTorch may not enable it by default.
 
@@ -219,9 +289,10 @@ mask-to-mri/
 │   └── med_ddpm_v3/
 │       ├── __init__.py          # Package init, exports
 │       ├── config.py            # All hyperparameters (Colab-optimized)
-│       ├── model.py             # U-Net + GaussianDiffusion + Min-SNR
-│       ├── train.py             # Training loop (fused AdamW, tqdm opt)
-│       └── sample.py            # Generation utility (copy from v2)
+│       ├── model.py             # U-Net + GaussianDiffusion + Min-SNR + CFG
+│       ├── train.py             # Training loop (fused AdamW, SSIM val, tqdm opt)
+│       ├── sample.py            # Generation utility
+│       └── utils.py             # Shared Drive sync helper
 ├── notebooks/
 │   └── med_ddpm_v3_train_colab.ipynb  # Colab training notebook
 └── docs/
@@ -243,9 +314,12 @@ mask-to-mri/
 | `timesteps` | 1000 | 1000 | Same (cosine schedule) |
 | `ddim_steps` | 250 | 250 | Same |
 | `min_snr_gamma` | N/A | **5** | NEW: faster convergence |
+| `attention_resolutions` | "16" | **"16,32"** | NEW: multi-scale attention |
 | `dropout` | 0.0 | **0.1** | NEW: less overfitting |
 | `cfg_drop_prob` | N/A | **0.1** | NEW: classifier-free guidance |
 | `fused_optimizer` | N/A | **True** | NEW: 20-30% faster |
+| `update_ema_every` | 10 | **1** | Every step (standard for diffusion) |
+| `step_start_ema` | 2000 | **100** | After ~1 epoch (faster start) |
 | `tqdm_miniters` | default (1) | **4** | NEW: less overhead |
 | `tqdm_mininterval` | default (0.1) | **0.5** | NEW: less overhead |
 
