@@ -35,7 +35,7 @@ def _sync_to_drive(local_path: str, drive_base: str | None) -> None:
         return
     try:
         import shutil
-        outputs_base = "/content/Mask-to-MRI/outputs_v2"
+        outputs_base = "/content/Mask-to-MRI/outputs_v3"
         rel = Path(local_path).relative_to(outputs_base)
         drive_path = Path(drive_base) / rel
         drive_path.parent.mkdir(parents=True, exist_ok=True)
