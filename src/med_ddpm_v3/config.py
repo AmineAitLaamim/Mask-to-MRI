@@ -67,7 +67,7 @@ CONFIG = {
     "ema_decay_start": 0.9,       # NEW: ramp EMA decay from 0.9 → 0.995
     "ema_decay_ramp_epochs": 50,  # NEW: epochs to ramp EMA decay
     "update_ema_every": 5,          # Update EMA every 5 steps (balance quality vs speed)
-    "step_start_ema": 2000,
+    "step_start_ema": 500,          # Start EMA after ~3 epochs (earlier than original 2000)
     "grad_clip": 1.0,
     "cfg_drop_prob": 0.1,         # NEW: classifier-free guidance mask dropout
     "save_every": 10,
