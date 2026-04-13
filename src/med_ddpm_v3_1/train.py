@@ -354,7 +354,14 @@ def train(
         print(f"  LR restored to: {restored_lr:.6f}")
 
     # ── Training loop ─────────────────────────────────────────────────
-    print(f"\nFine-tuning DDPM v3.1: epoch {start_epoch + 1}–{epochs} of {epochs}")
+    # When resuming, interpret "epochs" as "additional epochs to run"
+    if resume_from and start_epoch > 0:
+        total_epochs = start_epoch + epochs
+        print(f"Resuming from epoch {start_epoch}, training {epochs} more → epoch {total_epochs}")
+    else:
+        total_epochs = epochs
+        print(f"\nFine-tuning DDPM v3.1: epoch 1–{epochs} of {epochs}")
+
     print(f"  LR={lr} (warmup {warmup_epochs} epochs → cosine decay, eta_min=1e-5)")
     print(f"  EMA decay={ema_decay}, update every {update_ema_every} steps")
     print(f"  DDIM steps={ddim_steps}, Grad clipping max_norm={grad_clip}")
@@ -364,7 +371,7 @@ def train(
     # Track loss history for spike detection
     _recent_losses = []
 
-    for epoch in range(start_epoch + 1, epochs + 1):
+    for epoch in range(start_epoch + 1, total_epochs + 1):
         model.train()
         ema_model.eval()
         epoch_loss = 0.0
