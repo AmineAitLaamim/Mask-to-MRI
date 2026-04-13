@@ -757,6 +757,8 @@ class GaussianDiffusion(nn.Module):
         Args:
             cfg_scale: guidance weight (1.5-3.0 recommended, 1.0 = no CFG)
         """
+        assert 0.0 <= cfg_scale <= 10.0, f"cfg_scale={cfg_scale} out of safe range [0, 10]"
+
         if cfg_scale <= 1.0:
             return self.ddim_sample(shape, condition_tensors, ddim_steps, ddim_eta)
 
@@ -944,7 +946,7 @@ class ConditionalDDPM(nn.Module):
         Training forward: compute diffusion loss.
 
         Args:
-            mri: (B, 3, H, W) — clean MRI in [-1, 1]
+            mri: (B, 1, H, W) — clean FLAIR MRI in [-1, 1]
             mask: (B, 1, H, W) — binary segmentation mask
 
         Returns:
