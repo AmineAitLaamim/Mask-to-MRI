@@ -46,7 +46,7 @@ CONFIG = {
     "num_heads": 4,
     "use_scale_shift_norm": False,
     "resblock_updown": False,
-    "dropout": 0.0,
+    "dropout": 0.1,             # NEW: prevents overfitting on small dataset
     "use_checkpoint": False,       # Disabled — batch=8 fits in T4 VRAM without it
 
     # ── Diffusion ─────────────────────────────────────────────────────
@@ -64,9 +64,12 @@ CONFIG = {
     "lr": 1e-4,
     "warmup_epochs": 5,
     "ema_decay": 0.995,
+    "ema_decay_start": 0.9,       # NEW: ramp EMA decay from 0.9 → 0.995
+    "ema_decay_ramp_epochs": 50,  # NEW: epochs to ramp EMA decay
     "update_ema_every": 1,
     "step_start_ema": 2000,
     "grad_clip": 1.0,
+    "cfg_drop_prob": 0.1,         # NEW: classifier-free guidance mask dropout
     "save_every": 10,
     "amp": True,
     "fused_optimizer": True,      # NEW: fused AdamW (20-30% faster)

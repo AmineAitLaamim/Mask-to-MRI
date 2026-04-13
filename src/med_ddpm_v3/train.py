@@ -294,6 +294,17 @@ def train(
     for p in ema_model.parameters():
         p.requires_grad = False
 
+    # EMA decay schedule: ramp from ema_decay_start → ema_decay over ramp_epochs
+    ema_decay_start = config.get("ema_decay_start", 0.9)
+    ema_decay_ramp_epochs = config.get("ema_decay_ramp_epochs", 50)
+    ema_decay = config["ema_decay"]
+
+    def get_ema_decay(epoch: int) -> float:
+        """Linear ramp of EMA decay: start low, increase to target."""
+        if epoch <= ema_decay_ramp_epochs:
+            return ema_decay_start + (ema_decay - ema_decay_start) * (epoch / ema_decay_ramp_epochs)
+        return ema_decay
+
     # ── AMP GradScaler ────────────────────────────────────────────────
     scaler = torch.amp.GradScaler("cuda") if device.type == "cuda" and config.get("amp", True) else None
     if scaler is not None:
@@ -401,11 +412,12 @@ def train(
                 print(f"      mri  range: [{mri_batch.min():.3f}, {mri_batch.max():.3f}]", flush=True)
                 print(f"      mask range: [{mask_batch.min():.3f}, {mask_batch.max():.3f}]", flush=True)
 
-            # ── EMA update ────────────────────────────────────────────────
+            # ── EMA update with decay schedule ────────────────────────────
+            current_ema_decay = get_ema_decay(epoch)
             if global_step >= step_start_ema and global_step % update_ema_every == 0:
                 with torch.no_grad():
                     for ema_p, live_p in zip(ema_model.parameters(), model.parameters()):
-                        ema_p.data.mul_(ema_decay).add_(live_p.data, alpha=1.0 - ema_decay)
+                        ema_p.data.mul_(current_ema_decay).add_(live_p.data, alpha=1.0 - current_ema_decay)
 
         avg_loss = epoch_loss / n_batches
         scheduler.step()
@@ -415,6 +427,8 @@ def train(
         loss_min = min(_batch_losses)
         loss_max = max(_batch_losses)
         _recent_losses.append(avg_loss)
+
+        current_ema_decay = get_ema_decay(epoch)
 
         # Detect loss spike (current epoch >2x previous avg)
         spike_warning = ""

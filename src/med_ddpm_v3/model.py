@@ -746,6 +746,70 @@ class GaussianDiffusion(nn.Module):
 
         return img
 
+    @torch.no_grad()
+    def ddim_sample_cfg(self, shape, condition_tensors=None, ddim_steps=50, ddim_eta=0.0, cfg_scale=1.5):
+        """
+        DDIM sampling with Classifier-Free Guidance.
+
+        CFG mixes conditional and unconditional predictions:
+            noise_pred = (1 + w) * noise_cond - w * noise_uncond
+
+        Args:
+            cfg_scale: guidance weight (1.5-3.0 recommended, 1.0 = no CFG)
+        """
+        if cfg_scale <= 1.0:
+            return self.ddim_sample(shape, condition_tensors, ddim_steps, ddim_eta)
+
+        batch, device = shape[0], self.betas.device
+        total_timesteps, sampling_timesteps = self.num_timesteps, ddim_steps
+        eta = ddim_eta
+
+        times = torch.linspace(-1, total_timesteps - 1, steps=sampling_timesteps + 1)
+        times = list(reversed(times.int().tolist()))
+        time_pairs = list(zip(times[:-1], times[1:]))
+
+        # Correlated noise initialization
+        noise_1ch = torch.randn(shape[0], 1, shape[2], shape[3], device=device)
+        img = noise_1ch.expand(shape[0], shape[1], shape[2], shape[3]).clone()
+
+        # Empty mask for unconditional generation (all zeros)
+        uncond_mask = torch.zeros_like(condition_tensors) if condition_tensors is not None else None
+
+        for time, time_next in time_pairs:
+            time_cond = torch.full((batch,), time, device=device, dtype=torch.long)
+
+            # Conditional prediction
+            cond_input = torch.cat([img, condition_tensors], dim=1) if condition_tensors is not None else img
+            noise_cond = self.denoise_fn(cond_input, time_cond)
+
+            # Unconditional prediction (mask zeroed)
+            if uncond_mask is not None:
+                uncond_input = torch.cat([img, uncond_mask], dim=1)
+            else:
+                uncond_input = img
+            noise_uncond = self.denoise_fn(uncond_input, time_cond)
+
+            # CFG mixing
+            noise_pred = (1 + cfg_scale) * noise_cond - cfg_scale * noise_uncond
+
+            x_start = self.predict_start_from_noise(img, t=time_cond, noise=noise_pred)
+            x_start = x_start.clamp(-1.0, 1.0)
+
+            if time_next < 0:
+                img = x_start
+                continue
+
+            alpha = self.alphas_cumprod[time]
+            alpha_next = self.alphas_cumprod[time_next]
+
+            sigma = eta * ((1 - alpha / alpha_next) * (1 - alpha_next) / (1 - alpha)).sqrt()
+            c = (1 - alpha_next - sigma ** 2).sqrt()
+
+            noise = torch.randn_like(img)
+            img = x_start * alpha_next.sqrt() + c * noise_pred + sigma * noise
+
+        return img
+
     # ── Training loss ─────────────────────────────────────────────────
 
     def p_losses(self, x_start, t, condition_tensors=None, noise=None):
@@ -757,11 +821,22 @@ class GaussianDiffusion(nn.Module):
           - Early timesteps (high noise) dominate loss
           - Min-SNR reweights to focus on critical structure-forming timesteps
           - Reported 3.4× faster convergence (Hang et al. 2023)
+
+        Classifier-Free Guidance (CFG):
+          - 10% of training samples have mask zeroed out
+          - Teaches model unconditional generation
+          - At sampling time, mix conditional + unconditional predictions
         """
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         # Condition: concatenate mask with noisy image before U-Net
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
+
+        # CFG: randomly drop mask during training (zero = unconditional)
+        if condition_tensors is not None and hasattr(self, 'cfg_drop_prob') and self.cfg_drop_prob > 0:
+            drop_mask = torch.rand(x_start.shape[0], device=x_start.device) < self.cfg_drop_prob
+            condition_tensors = condition_tensors * (~drop_mask).view(-1, 1, 1, 1).float()
+
         x_noisy_cond = torch.cat([x_noisy, condition_tensors], dim=1) if condition_tensors is not None else x_noisy
         noise_pred = self.denoise_fn(x_noisy_cond, t)
 
@@ -861,6 +936,8 @@ class ConditionalDDPM(nn.Module):
             loss_type=config.get("loss_type", "l1"),
             min_snr_gamma=config.get("min_snr_gamma", 5),
         )
+        # CFG: pass drop prob to diffusion for training-time mask dropout
+        self.diffusion.cfg_drop_prob = config.get("cfg_drop_prob", 0.0)
 
     def forward(self, mri: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         """
@@ -881,6 +958,7 @@ class ConditionalDDPM(nn.Module):
         mask: torch.Tensor,
         batch_size: int | None = None,
         ddim_steps: int | None = None,
+        cfg_scale: float = 1.0,  # NEW: >1.0 enables CFG
     ) -> torch.Tensor:
         """
         Generate synthetic MRI conditioned on mask.
@@ -889,14 +967,18 @@ class ConditionalDDPM(nn.Module):
             mask: (B, 1, H, W) — conditioning segmentation mask
             batch_size: override batch size (default: mask.shape[0])
             ddim_steps: number of DDIM steps (default: config value)
+            cfg_scale: classifier-free guidance scale (1.0=disabled, 1.5-3.0=recommended)
 
         Returns:
-            (B, 3, H, W) — generated MRI in [-1, 1]
+            (B, 1, H, W) — generated MRI in [-1, 1]
         """
         b = batch_size or mask.shape[0]
         steps = ddim_steps if ddim_steps is not None else self.config.get("ddim_steps", 250)
 
         shape = (b, self.config["out_channels"], self.config["image_size"], self.config["image_size"])
+
+        if cfg_scale > 1.0:
+            return self.diffusion.ddim_sample_cfg(shape, mask, steps, cfg_scale=cfg_scale)
 
         # Use DDIM for speed (250 steps vs 250 full = same for config default)
         # If ddim_steps == num_timesteps, use full p_sample_loop (identical results)
