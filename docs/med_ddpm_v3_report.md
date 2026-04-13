@@ -45,7 +45,7 @@
 |--------------|-----------------|-----------------|
 | **Min-SNR Weighting** | Hang et al. 2023 — "Efficient Diffusion Training via Min-SNR Weighting Strategy" | **3.4× faster convergence** |
 | **Fused AdamW** | PyTorch 2.0+ native | **20-30% faster optimizer step** |
-| **Gradient Checkpointing** | Chen et al. 2016 — "Training Deep Nets with Sublinear Memory Cost" | **40-50% less VRAM** |
+| **Gradient Checkpointing** | Chen et al. 2016 — "Training Deep Nets with Sublinear Memory Cost" | **Disabled** (batch=8 fits in T4 VRAM) |
 | **Optimized tqdm** | Empirical | **5-10% less epoch overhead** |
 | **TF32 auto-enable** | NVIDIA Ampere+ GPU feature | **2-3× matmul speedup** |
 
@@ -195,7 +195,7 @@ mask-to-mri/
 | `timesteps` | 1000 | 1000 | Same (cosine schedule) |
 | `ddim_steps` | 250 | 250 | Same |
 | `min_snr_gamma` | N/A | **5** | NEW: faster convergence |
-| `use_checkpoint` | N/A | **True** | NEW: 40% less VRAM |
+| `use_checkpoint` | N/A | **False** | Disabled (not needed for T4) |
 | `fused_optimizer` | N/A | **True** | NEW: 20-30% faster |
 | `tqdm_miniters` | default (1) | **4** | NEW: less overhead |
 | `tqdm_mininterval` | default (0.1) | **0.5** | NEW: less overhead |

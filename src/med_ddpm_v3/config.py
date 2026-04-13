@@ -47,7 +47,7 @@ CONFIG = {
     "use_scale_shift_norm": False,
     "resblock_updown": False,
     "dropout": 0.0,
-    "use_checkpoint": True,       # NEW: gradient checkpointing (saves ~40% VRAM)
+    "use_checkpoint": False,       # Disabled — batch=8 fits in T4 VRAM without it
 
     # ── Diffusion ─────────────────────────────────────────────────────
     "timesteps": 1000,
