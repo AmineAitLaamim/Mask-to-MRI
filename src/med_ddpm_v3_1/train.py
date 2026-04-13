@@ -322,7 +322,9 @@ def train(
     history = []
     global_step = 0
 
-    resume_from = config.get("resume_from")
+    # Use function arg if provided, otherwise fall back to config
+    if resume_from is None:
+        resume_from = config.get("resume_from")
 
     if resume_from and os.path.exists(resume_from):
         checkpoint = torch.load(resume_from, map_location=device, weights_only=False)
@@ -347,7 +349,7 @@ def train(
         print(f"  LR restored to: {restored_lr:.6f}")
 
     # ── Training loop ─────────────────────────────────────────────────
-    print(f"\nTraining DDPM v3: epoch {start_epoch + 1}–{epochs} of {epochs}")
+    print(f"\nFine-tuning DDPM v3.1: epoch {start_epoch + 1}–{epochs} of {epochs}")
     print(f"  LR={lr} (warmup {warmup_epochs} epochs → cosine decay, eta_min=1e-5)")
     print(f"  EMA decay={ema_decay}, update every {update_ema_every} steps")
     print(f"  DDIM steps={ddim_steps}, Grad clipping max_norm={grad_clip}")
@@ -404,6 +406,15 @@ def train(
                 optimizer.step()
 
             loss_val = loss.item()
+
+            # ── Warn on NaN/Inf loss — skip this batch to prevent corruption ──
+            if loss_val != loss_val or loss_val == float("inf"):
+                print(f"\n  ⚠️  [step {global_step}] NaN/Inf loss detected! loss={loss_val}, skipping batch", flush=True)
+                print(f"      mri  range: [{mri_batch.min():.3f}, {mri_batch.max():.3f}]", flush=True)
+                print(f"      mask range: [{mask_batch.min():.3f}, {mask_batch.max():.3f}]", flush=True)
+                global_step += 1
+                continue
+
             epoch_loss += loss_val
             n_batches += 1
             global_step += 1
@@ -414,12 +425,6 @@ def train(
                 "grad": f"{grad_norm:.2f}",
                 "step": global_step,
             })
-
-            # ── Warn on NaN/Inf loss ──────────────────────────────────
-            if loss_val != loss_val or loss_val == float("inf"):
-                print(f"\n  ⚠️  [step {global_step}] NaN/Inf loss detected! loss={loss_val}", flush=True)
-                print(f"      mri  range: [{mri_batch.min():.3f}, {mri_batch.max():.3f}]", flush=True)
-                print(f"      mask range: [{mask_batch.min():.3f}, {mask_batch.max():.3f}]", flush=True)
 
             # ── EMA update with decay schedule ────────────────────────────
             current_ema_decay = get_ema_decay(epoch)
@@ -492,23 +497,23 @@ def train(
         if epoch % save_every == 0 or epoch == epochs:
             ckpt_path = _save_checkpoint(
                 model, ema_model, optimizer, scheduler, epoch, global_step, history,
-                checkpoint_dir, suffix="v3",
+                checkpoint_dir, suffix="v3_1",
             )
             _sync_to_drive(ckpt_path, drive_base)
 
             sample_path = _save_sample_grid(
                 model, ema_model, val_loader, epoch, samples_dir, device,
-                suffix="v3", ddim_steps=ddim_steps,
+                suffix="v3_1", ddim_steps=ddim_steps,
             )
             if sample_path:
                 _sync_to_drive(sample_path, drive_base)
 
-            _save_loss_plot(history, os.path.join(samples_dir, "v3_loss_curves.png"))
-            _sync_to_drive(os.path.join(samples_dir, "v3_loss_curves.png"), drive_base)
-            _save_metrics(history, os.path.join(metrics_dir, "v3_training_history.json"))
-            _sync_to_drive(os.path.join(metrics_dir, "v3_training_history.json"), drive_base)
+            _save_loss_plot(history, os.path.join(samples_dir, "v3_1_loss_curves.png"))
+            _sync_to_drive(os.path.join(samples_dir, "v3_1_loss_curves.png"), drive_base)
+            _save_metrics(history, os.path.join(metrics_dir, "v3_1_training_history.json"))
+            _sync_to_drive(os.path.join(metrics_dir, "v3_1_training_history.json"), drive_base)
 
-    print("\nDDPM v3 training complete.")
+    print("\nDDPM v3.1 fine-tuning complete.")
     return history
 
 
