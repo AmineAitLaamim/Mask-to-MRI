@@ -33,7 +33,7 @@ def _sync_to_drive(local_path: str, drive_base: str | None) -> None:
     if drive_base is None:
         return  # Not on Colab — skip silently
     try:
-        outputs_base = "/content/Mask-to-MRI/outputs_v2"
+        outputs_base = "/content/Mask-to-MRI/outputs_v3"
         rel = Path(local_path).relative_to(outputs_base)
         drive_path = Path(drive_base) / rel
         drive_path.parent.mkdir(parents=True, exist_ok=True)
@@ -325,7 +325,7 @@ def train(
         print(f"  LR restored to: {restored_lr:.6f}")
 
     # ── Training loop ─────────────────────────────────────────────────
-    print(f"\nTraining DDPM v2: epoch {start_epoch + 1}–{epochs} of {epochs}")
+    print(f"\nTraining DDPM v3: epoch {start_epoch + 1}–{epochs} of {epochs}")
     print(f"  LR={lr} (warmup {warmup_epochs} epochs → cosine decay, eta_min=1e-5)")
     print(f"  EMA decay={ema_decay}, update every {update_ema_every} steps")
     print(f"  DDIM steps={ddim_steps}, Grad clipping max_norm={grad_clip}")
@@ -464,23 +464,23 @@ def train(
         if epoch % save_every == 0 or epoch == epochs:
             ckpt_path = _save_checkpoint(
                 model, ema_model, optimizer, scheduler, epoch, global_step, history,
-                checkpoint_dir, suffix="v2",
+                checkpoint_dir, suffix="v3",
             )
             _sync_to_drive(ckpt_path, drive_base)
 
             sample_path = _save_sample_grid(
                 model, ema_model, val_loader, epoch, samples_dir, device,
-                suffix="v2", ddim_steps=ddim_steps,
+                suffix="v3", ddim_steps=ddim_steps,
             )
             if sample_path:
                 _sync_to_drive(sample_path, drive_base)
 
-            _save_loss_plot(history, os.path.join(samples_dir, "v2_loss_curves.png"))
-            _sync_to_drive(os.path.join(samples_dir, "v2_loss_curves.png"), drive_base)
-            _save_metrics(history, os.path.join(metrics_dir, "v2_training_history.json"))
-            _sync_to_drive(os.path.join(metrics_dir, "v2_training_history.json"), drive_base)
+            _save_loss_plot(history, os.path.join(samples_dir, "v3_loss_curves.png"))
+            _sync_to_drive(os.path.join(samples_dir, "v3_loss_curves.png"), drive_base)
+            _save_metrics(history, os.path.join(metrics_dir, "v3_training_history.json"))
+            _sync_to_drive(os.path.join(metrics_dir, "v3_training_history.json"), drive_base)
 
-    print("\nDDPM v2 training complete.")
+    print("\nDDPM v3 training complete.")
     return history
 
 
