@@ -7,6 +7,11 @@ Architecture:
   - Mask conditioning via channel-wise concatenation: x_noisy(1) + mask(1) → 2 channels
   - Single-channel FLAIR output
 
+Optimizations (v3):
+  - Min-SNR weighting (gamma=5) for faster convergence
+  - Classifier-Free Guidance (10% mask dropout during training)
+  - Gradient checkpointing support (disabled by default — saves VRAM when enabled)
+
 Original 3D→2D changes:
   - Conv3d → Conv2d, AvgPool3d → AvgPool2d, interpolate 3D → 2D
   - Remove depth_size entirely
@@ -848,10 +853,8 @@ class GaussianDiffusion(nn.Module):
         # Min-SNR weighting
         gamma = getattr(self, 'min_snr_gamma', 5)
         alpha_bar_t = extract(self.alphas_cumprod, t, loss.shape)
-        snr = alpha_bar_t / (1 - alpha_bar_t)  # SNR(t) = alpha_bar / (1 - alpha_bar)
-        weight = torch.stack([snr, gamma * torch.ones_like(snr)], dim=1).min(dim=1)[0] / snr
-        # weight shape: (B,) → broadcast to (B, C, H, W)
-        weight = weight.view(loss.shape[0], *([1] * (loss.dim() - 1)))
+        snr = alpha_bar_t / (1 - alpha_bar_t + 1e-8)  # +epsilon prevents div-by-zero at high t
+        weight = torch.clamp(snr, max=gamma) / snr  # equivalent to min(1, gamma/snr)
         loss = (loss * weight).mean()
 
         return loss
