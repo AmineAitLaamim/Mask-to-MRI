@@ -107,6 +107,7 @@ def generate_synthetic(
     config: dict,
     raw_dir: str | None = None,
     ddim_steps: int | None = None,
+    cfg_scale: float = 1.0,
 ):
     """
     Generate synthetic MRIs from all tumor-containing training masks.
@@ -117,6 +118,7 @@ def generate_synthetic(
         config: Configuration dict
         raw_dir: Raw dataset directory (for loading training masks)
         ddim_steps: Number of DDIM sampling steps (default: from config)
+        cfg_scale: Classifier-free guidance scale (1.0=disabled, 1.5-3.0=sharper)
     """
     raw_dir = raw_dir or config["raw_dir"]
     ddim_steps = ddim_steps or config.get("ddim_steps", 250)
@@ -142,7 +144,7 @@ def generate_synthetic(
         mask = mask.unsqueeze(0).to(device)  # (1, 1, H, W)
 
         with torch.no_grad():
-            fake = model.sample(mask, ddim_steps=ddim_steps)
+            fake = model.sample(mask, ddim_steps=ddim_steps, cfg_scale=cfg_scale)
 
         # Denormalize: [-1,1] → [0,255] — single channel grayscale
         fake_np = ((fake[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
