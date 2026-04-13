@@ -455,12 +455,12 @@ def train(
         # ── Validation + logging at checkpoint intervals ──────────────
         if epoch % save_every == 0 or epoch == epochs:
             val_loss = _evaluate_val_loss(val_loader, model, device)
-            val_ssim = _compute_val_ssim(ema_model, val_loader, device)
+            # val_ssim = _compute_val_ssim(ema_model, val_loader, device)  # Disabled — too slow
             epoch_record = {
                 "epoch": epoch,
                 "loss": avg_loss,
                 "val_loss": val_loss,
-                "val_ssim": val_ssim,
+                # "val_ssim": val_ssim,
                 "lr": current_lr,
             }
             overfit = ""
@@ -468,7 +468,7 @@ def train(
                 overfit = "  ⚠️  OVERFIT?"
             print(f"\n  Loss:     avg={avg_loss:.4f}  min={loss_min:.4f}  max={loss_max:.4f}{spike_warning}", flush=True)
             print(f"  Val Loss: {val_loss:.4f}{overfit}", flush=True)
-            print(f"  Val SSIM: {val_ssim:.4f}", flush=True)
+            # print(f"  Val SSIM: {val_ssim:.4f}", flush=True)
             print(f"  LR:       {current_lr:.6f}", flush=True)
             print(f"  GradNorm: {grad_norm:.3f} (clip={grad_clip})", flush=True)
             print(f"  AMP scale:{scaler_scale}", flush=True)
