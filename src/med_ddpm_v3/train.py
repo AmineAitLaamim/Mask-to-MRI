@@ -14,7 +14,6 @@ Features:
 
 import os
 import json
-import shutil
 from pathlib import Path
 
 import torch
@@ -24,24 +23,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .model import ConditionalDDPM
-
-
-# ---------------------------------------------------------------------------
-# Drive sync helper
-# ---------------------------------------------------------------------------
-
-def _sync_to_drive(local_path: str, drive_base: str | None) -> None:
-    """Copy a file from local outputs_v3 to Google Drive mirror."""
-    if drive_base is None:
-        return  # Not on Colab — skip silently
-    try:
-        outputs_base = "/content/Mask-to-MRI/outputs_v3"
-        rel = Path(local_path).relative_to(outputs_base)
-        drive_path = Path(drive_base) / rel
-        drive_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(local_path, drive_path)
-    except Exception as e:
-        print(f"  Drive sync failed: {e}")
+from .utils import _sync_to_drive
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +272,8 @@ def train(
     ema_model.load_state_dict(model.state_dict())
     ema_model = ema_model.to(device)
     ema_model.eval()
+    # Propagate CFG drop prob to EMA model (used at sampling time)
+    ema_model.diffusion.cfg_drop_prob = model.diffusion.cfg_drop_prob
     # Freeze EMA model parameters (they are only updated via EMA)
     for p in ema_model.parameters():
         p.requires_grad = False
