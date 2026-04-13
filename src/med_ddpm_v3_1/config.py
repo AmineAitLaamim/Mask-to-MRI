@@ -36,7 +36,7 @@ CONFIG = {
     # ── Data ──────────────────────────────────────────────────────────
     "raw_dir": _RAW_DIR,
     "image_size": 256,
-    "tumor_ratio": 0.0,          # 0 = use ALL data (no tumor filter)
+    "tumor_ratio": 0.8,            # Keep 80/20 balanced
     "seed": 42,
 
     # ── Model (same as v3) ───────────────────────────────────────────
