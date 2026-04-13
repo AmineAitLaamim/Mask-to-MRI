@@ -1,10 +1,10 @@
 """
-Generate synthetic MRIs from training masks using trained DDPM v2 model.
+Generate synthetic MRIs from training masks using trained DDPM v3 model.
 
 Usage:
     generate_synthetic(
-        checkpoint_path="outputs_v2/checkpoints/checkpoint_v2_epoch_200.pt",
-        output_dir="outputs_v2/synthetic",
+        checkpoint_path="outputs_v3/checkpoints/checkpoint_v3_epoch_200.pt",
+        output_dir="outputs_v3/synthetic",
         raw_dir="dataset/lgg-mri-segmentation",
         config=CONFIG,
     )
@@ -30,7 +30,7 @@ from .model import ConditionalDDPM
 # ---------------------------------------------------------------------------
 
 def _sync_to_drive(local_path: str, drive_base: str | None) -> None:
-    """Copy a file from local outputs_v2 to Google Drive mirror."""
+    """Copy a file from local outputs_v3 to Google Drive mirror."""
     if drive_base is None:
         return
     try:

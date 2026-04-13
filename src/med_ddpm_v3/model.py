@@ -417,7 +417,7 @@ class UNetModel(nn.Module):
         if self.num_classes is not None:
             self.label_emb = nn.Embedding(num_classes, time_embed_dim)
 
-        # Input block — receives (noisy_mri + mask) concatenated = 4 channels
+        # Input block — receives (noisy_flair + mask) concatenated = 2 channels
         ch = input_ch = int(channel_mult[0] * model_channels)
         self.input_blocks = nn.ModuleList([
             TimestepEmbedSequential(nn.Conv2d(in_channels, ch, 3, padding=1))
