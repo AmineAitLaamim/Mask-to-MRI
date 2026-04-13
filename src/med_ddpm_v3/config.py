@@ -42,7 +42,7 @@ CONFIG = {
     "num_res_blocks": 1,
     "in_channels": 2,            # noisy_flair(1) + mask(1)
     "out_channels": 1,           # predicted noise for FLAIR
-    "attention_resolutions": "16",
+    "attention_resolutions": "16,32",  # Attention at 16×16 and 32×32 spatial scales
     "num_heads": 4,
     "use_scale_shift_norm": False,
     "resblock_updown": False,
@@ -66,8 +66,8 @@ CONFIG = {
     "ema_decay": 0.995,
     "ema_decay_start": 0.9,       # NEW: ramp EMA decay from 0.9 → 0.995
     "ema_decay_ramp_epochs": 50,  # NEW: epochs to ramp EMA decay
-    "update_ema_every": 5,          # Update EMA every 5 steps (balance quality vs speed)
-    "step_start_ema": 500,          # Start EMA after ~3 epochs (earlier than original 2000)
+    "update_ema_every": 1,          # Update EMA every step (standard for diffusion)
+    "step_start_ema": 100,          # Start EMA after ~1 epoch
     "grad_clip": 1.0,
     "cfg_drop_prob": 0.1,         # NEW: classifier-free guidance mask dropout
     "save_every": 10,

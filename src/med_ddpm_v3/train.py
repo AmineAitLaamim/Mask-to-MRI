@@ -27,6 +27,29 @@ from .utils import _sync_to_drive
 
 
 # ---------------------------------------------------------------------------
+# Validation SSim
+# ---------------------------------------------------------------------------
+
+def _compute_val_ssim(model, val_loader, device, n_batches=4, ddim_steps=50):
+    """Quick SSIM estimate on val set using fast 50-step DDIM."""
+    from skimage.metrics import structural_similarity as ssim
+    import numpy as np
+
+    scores = []
+    with torch.no_grad():
+        for i, (mask, real) in enumerate(val_loader):
+            if i >= n_batches:
+                break
+            mask = mask.to(device)
+            fake = model.sample(mask, ddim_steps=ddim_steps)
+            for b in range(fake.shape[0]):
+                f = fake[b, 0].cpu().numpy()
+                r = real[b, 0].numpy()
+                scores.append(ssim(f, r, data_range=2.0))
+    return float(np.mean(scores)) if scores else 0.0
+
+
+# ---------------------------------------------------------------------------
 # Checkpoint save / load
 # ---------------------------------------------------------------------------
 
@@ -432,10 +455,12 @@ def train(
         # ── Validation + logging at checkpoint intervals ──────────────
         if epoch % save_every == 0 or epoch == epochs:
             val_loss = _evaluate_val_loss(val_loader, model, device)
+            val_ssim = _compute_val_ssim(ema_model, val_loader, device)
             epoch_record = {
                 "epoch": epoch,
                 "loss": avg_loss,
                 "val_loss": val_loss,
+                "val_ssim": val_ssim,
                 "lr": current_lr,
             }
             overfit = ""
@@ -443,6 +468,7 @@ def train(
                 overfit = "  ⚠️  OVERFIT?"
             print(f"\n  Loss:     avg={avg_loss:.4f}  min={loss_min:.4f}  max={loss_max:.4f}{spike_warning}", flush=True)
             print(f"  Val Loss: {val_loss:.4f}{overfit}", flush=True)
+            print(f"  Val SSIM: {val_ssim:.4f}", flush=True)
             print(f"  LR:       {current_lr:.6f}", flush=True)
             print(f"  GradNorm: {grad_norm:.3f} (clip={grad_clip})", flush=True)
             print(f"  AMP scale:{scaler_scale}", flush=True)
