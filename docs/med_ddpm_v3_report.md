@@ -366,7 +366,107 @@ If the session times out, re-run from Cell 6. Cell 12 will auto-detect the lates
 
 ---
 
-## 8. Training Loss Note
+## 8. Generating Synthetic Images from Checkpoint 90
+
+### Quick Sampling Code
+
+Run this cell in Colab to generate 4 synthetic FLAIR images from the v3 epoch 90 checkpoint:
+
+```python
+import os, torch
+import numpy as np
+import tifffile
+from PIL import Image
+from src.med_ddpm_v3 import ConditionalDDPM, CONFIG
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+output_dir = CONFIG["synthetic_dir"]
+drive_output = "/content/drive/MyDrive/mask-to-mri/outputs_v3/synthetic"
+os.makedirs(output_dir, exist_ok=True)
+os.makedirs(drive_output, exist_ok=True)
+
+# Load v3 epoch 90 checkpoint with EMA weights
+ckpt_path = "/content/drive/MyDrive/mask-to-mri/outputs_v3/checkpoints/checkpoint_v3_epoch_90.pt"
+model = ConditionalDDPM(CONFIG).to(device)
+ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+
+# Always use EMA weights for sharpest samples
+if "ema_state_dict" in ckpt:
+    model.load_state_dict(ckpt["ema_state_dict"])
+else:
+    model.load_state_dict(ckpt["model_state_dict"])
+model.eval()
+
+# Load training masks
+from src.dataset import get_patient_file_list, patient_level_split
+patient_data = get_patient_file_list(CONFIG["raw_dir"])
+splits = patient_level_split(patient_data, seed=CONFIG["seed"])
+train_pairs = splits["train"]
+
+count = 0
+for img_path, mask_path in train_pairs:
+    if count >= 4:
+        break
+    m = tifffile.imread(mask_path)
+    if (m > 0).sum() == 0:
+        continue
+
+    # Tumor size filter (skip very large or very small tumors)
+    tumor_pixels = (m > 0).sum()
+    tumor_ratio = tumor_pixels / (m.shape[0] * m.shape[1])
+    if tumor_ratio > 0.08 or tumor_pixels < 50:
+        continue
+
+    m = (m > 0).astype(np.uint8) * 255
+    m_norm = (m.astype(np.float32) / 127.5) - 1.0
+    mask_t = torch.from_numpy(m_norm).unsqueeze(0).unsqueeze(0).to(device)
+
+    # Generate with DDIM 250 steps
+    with torch.no_grad():
+        fake = model.sample(mask_t, ddim_steps=250)
+
+    # Quality filter (skip noise/bad samples)
+    fake_std = fake.std().item()
+    fake_mean = fake[0, 0].cpu().numpy().mean()
+    if fake_std < 0.15 or fake_mean > -0.3:
+        continue
+
+    stem = os.path.basename(mask_path).replace("_mask.tif", "")
+    fake_np = ((fake[0, 0].cpu().numpy() + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+
+    # Save to local and Drive
+    for dest in [output_dir, drive_output]:
+        Image.fromarray(fake_np, mode="L").save(os.path.join(dest, f"{stem}_synthetic.png"))
+        Image.fromarray(m).save(os.path.join(dest, f"{stem}_mask.png"))
+
+    print(f"✅ {stem}  (std={fake_std:.3f}, mean={fake_mean:.3f})")
+    count += 1
+
+print(f"\nDone. {count} images saved to {drive_output}")
+```
+
+### Output Location
+
+Generated images are saved to:
+- **Google Drive:** `MyDrive/mask-to-mri/outputs_v3/synthetic/`
+- **Local Colab:** `/content/Mask-to-MRI/outputs_v3/synthetic/`
+
+Each image pair:
+- `{patient_id}_synthetic.png` — generated FLAIR MRI
+- `{patient_id}_mask.png` — input tumor segmentation mask
+
+### Tips for Better Quality
+
+| Setting | Effect | Recommended |
+|---------|--------|-------------|
+| EMA weights | Sharper, cleaner samples | ✅ Always use |
+| DDIM 250 steps | Fast (16s/image), decent quality | Default |
+| Full DDPM 1000 steps | Slower (60s/image), sharper | Use for final outputs |
+| CFG scale 2.0 | Sharper edges, may add artifacts | Test 1.5-3.0 |
+
+---
+
+## 9. Training Loss Note
 
 With Min-SNR weighting, loss values will differ from v2:
 - **v2 loss:** Standard L1 (~0.5-1.0 range)
