@@ -56,6 +56,14 @@ from .med_ddpm import (
     generate_and_save,
     load_model_for_sampling,
 )
+from .experiment_B import (
+    CONFIG as EXPERIMENT_B_CONFIG,
+    SegmentationUNet,
+    build_experiment_b_dataloaders,
+    train_experiment_b,
+    evaluate_experiment_b,
+    run_full_experiment_b,
+)
 
 __all__ = [
     # pix2pix — Generator
@@ -118,4 +126,11 @@ __all__ = [
     "generate_from_masks",
     "generate_and_save",
     "load_model_for_sampling",
+    # Experiment B
+    "EXPERIMENT_B_CONFIG",
+    "SegmentationUNet",
+    "build_experiment_b_dataloaders",
+    "train_experiment_b",
+    "evaluate_experiment_b",
+    "run_full_experiment_b",
 ]
