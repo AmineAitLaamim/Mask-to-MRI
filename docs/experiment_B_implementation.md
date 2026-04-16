@@ -255,3 +255,84 @@ The following issues were found and fixed during implementation review:
 - Local `data/synthetic/` is not relevant to the intended workflow.
 - The actual workflow assumes Colab + Google Drive only.
 - The local synthetic folder may fail validation without this being a real problem, as long as the Drive synthetic dataset is correctly prepared.
+
+## Synthetic v2 Workflow
+
+A second synthetic-generation notebook was added for higher-quality candidate selection:
+
+- `notebooks/generate_synthetic_improved.ipynb`
+
+This notebook is intended to improve synthetic image quality before running the augmented Experiment B pipeline.
+
+### Output Folder
+
+The notebook saves to:
+
+- `MyDrive/mask-to-mri/outputs_v3/synthetic_v2/`
+
+### Main Differences From the Original Generator
+
+Instead of generating one candidate per mask and applying only a coarse global filter, the `synthetic_v2` workflow:
+
+1. generates multiple candidates per mask
+2. computes quality statistics for each candidate
+3. applies stronger filtering
+4. ranks valid candidates
+5. saves only the best valid candidate
+
+### Default Sampling Settings
+
+Current default settings in the notebook:
+
+- `DDIM_STEPS = 250`
+- `CFG_SCALE = 1.5`
+- `CANDIDATES_PER_MASK = 3`
+
+### Quality Checks
+
+The `synthetic_v2` notebook evaluates each candidate using:
+
+- global mean intensity
+- global standard deviation
+- tumor-region mean intensity
+- background mean intensity
+- tumor-vs-background contrast
+
+Candidates are rejected if they are:
+
+- too bright
+- too dark
+- too flat
+- too noisy
+- too weak in tumor contrast
+
+### Best-Candidate Selection
+
+For masks with multiple valid candidates, the notebook scores them against target image statistics and saves the highest-scoring candidate only.
+
+This makes the saved synthetic dataset cleaner than the original one-step generation pass.
+
+### Saved Metadata
+
+The notebook also saves:
+
+- `generation_summary.json`
+
+This file records:
+
+- number of saved samples
+- number of mask-filter skips
+- number of quality-filter skips
+- sampling settings
+- per-image quality statistics
+
+### Intended Use
+
+The recommended workflow is:
+
+1. generate the new synthetic dataset with `generate_synthetic_v2.ipynb`
+2. package the saved image/mask pairs as:
+   - `MyDrive/mask-to-mri/dataset/synthetic_data.zip`
+3. run the augmented Experiment B notebook using that Drive dataset
+
+This keeps Experiment B training separate from the raw generation outputs while allowing a cleaner curated synthetic training set.
