@@ -15,7 +15,8 @@
 4. [Phase 4: med_ddpm_v3 — Optimized Training](#phase-4-med_ddpm_v3--optimized-training)
 5. [Phase 5: med_ddpm_v3.1 — Fine-Tuning](#phase-5-med_ddpm_v31--fine-tuning)
 6. [Phase 6: Synthetic Data Generation](#phase-6-synthetic-data-generation)
-7. [Lessons Learned](#lessons-learned)
+7. [Phase 7: Optimization Efforts (Experimental)](#phase-7-optimization-efforts-experimental)
+8. [Lessons Learned](#lessons-learned)
 8. [Final Architecture](#final-architecture)
 9. [File Structure](#file-structure)
 10. [How to Reproduce](#how-to-reproduce)
@@ -191,6 +192,22 @@ Save to local + Google Drive
 | DDIM 250 + EMA | 16s/image | Good | Default |
 | Full DDPM 1000 | 60s/image | Sharper | Final outputs |
 | DDIM + CFG 2.0 | 32s/image | Sharpest edges | Experimentation |
+
+---
+
+## Phase 7: Optimization Efforts (Experimental)
+
+### Goal
+Address severe I/O bottlenecks in Google Colab and attempt to optimize GPU throughput for large-scale synthetic generation.
+
+### Key Optimizations Developed
+1.  **Colab I/O Pathing:** Updated notebooks to use local SSD storage (`/content`) instead of direct Drive mounts to bypass FUSE latency.
+2.  **Parallel Dataloading:** Implemented `ThreadPoolExecutor` in `src/experiment_B/dataset.py` for parallel mask filtering.
+3.  **Batched Generation:** Created a batched sampling loop (4 masks + 3 candidates in one pass).
+4.  **Single-Pass CFG:** Optimized the model to process conditional and unconditional branches in a single concatenated batch (2x speedup).
+
+### Current Status
+These optimizations were implemented but **reverted** to the previous baseline to ensure 100% architectural stability for the final report. The code remains available in the git history for future performance-critical scaling.
 
 ---
 
