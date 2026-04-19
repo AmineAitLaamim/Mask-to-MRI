@@ -160,6 +160,7 @@ def build_experiment_b_dataloaders(config: dict, mode: str = "baseline") -> dict
     from . import config as _config
     real_fraction = getattr(_config, "REAL_DATA_FRACTION", 1.0)
     synthetic_ratio = getattr(_config, "SYNTHETIC_RATIO", 1)
+    synthetic_only = getattr(_config, "SYNTHETIC_ONLY", False)
 
     raw_dir = config["raw_dir"]
     image_size = config.get("image_size", 256)
@@ -171,16 +172,7 @@ def build_experiment_b_dataloaders(config: dict, mode: str = "baseline") -> dict
     splits = patient_level_split(patient_data, seed=seed)
     splits = {name: _filter_tumor_pairs(pairs) for name, pairs in splits.items()}
 
-    # Subsample real training slices if REAL_DATA_FRACTION < 1.0
-    train_pairs = splits["train"]
-    if real_fraction < 1.0:
-        n = int(len(train_pairs) * real_fraction)
-        train_pairs = random.Random(seed).sample(train_pairs, n)
-        print(f"  Subsampled real training: {n}/{len(splits['train'])} slices (fraction={real_fraction})")
-
-    train_dataset = RealFLAIRSegmentationDataset(
-        train_pairs, image_size=image_size, augment=True
-    )
+    # Val and test always use real data regardless of SYNTHETIC_ONLY.
     val_dataset = RealFLAIRSegmentationDataset(
         splits["val"], image_size=image_size, augment=False
     )
@@ -188,23 +180,46 @@ def build_experiment_b_dataloaders(config: dict, mode: str = "baseline") -> dict
         splits["test"], image_size=image_size, augment=False
     )
 
-    if mode == "augmented":
+    if synthetic_only:
+        # Experiment F: use all available synthetic pairs as training data.
+        # Real slices are completely excluded from training.
+        # REAL_DATA_FRACTION and SYNTHETIC_RATIO are ignored.
         synthetic_dataset = SyntheticPNGSegmentationDataset(
-            config["synthetic_dir"], image_size=image_size, augment=True
+            config["synthetic_dir"], image_size=image_size, augment=False
         )
-        n_synthetic = int(len(train_dataset) * synthetic_ratio)
-        if len(synthetic_dataset) < n_synthetic:
-            raise ValueError(
-                f"Not enough synthetic pairs: need {n_synthetic} "
-                f"(ratio={synthetic_ratio}), got {len(synthetic_dataset)}"
+        if len(synthetic_dataset) == 0:
+            raise ValueError("SYNTHETIC_ONLY=True but no synthetic pairs found")
+        print(f"  SYNTHETIC_ONLY mode: {len(synthetic_dataset)} synthetic pairs, 0 real training slices")
+        train_dataset = synthetic_dataset
+    else:
+        # Subsample real training slices if REAL_DATA_FRACTION < 1.0
+        train_pairs = splits["train"]
+        if real_fraction < 1.0:
+            n = int(len(train_pairs) * real_fraction)
+            train_pairs = random.Random(seed).sample(train_pairs, n)
+            print(f"  Subsampled real training: {n}/{len(splits['train'])} slices (fraction={real_fraction})")
+
+        train_dataset = RealFLAIRSegmentationDataset(
+            train_pairs, image_size=image_size, augment=True
+        )
+
+        if mode == "augmented":
+            synthetic_dataset = SyntheticPNGSegmentationDataset(
+                config["synthetic_dir"], image_size=image_size, augment=True
             )
-        rng = random.Random(seed)
-        chosen = rng.sample(range(len(synthetic_dataset)), k=n_synthetic)
-        synthetic_dataset = torch.utils.data.Subset(synthetic_dataset, chosen)
-        print(f"  Synthetic samples: {n_synthetic} (ratio={synthetic_ratio}:1)")
-        train_dataset = ConcatDataset([train_dataset, synthetic_dataset])
-    elif mode != "baseline":
-        raise ValueError(f"Unsupported mode: {mode}")
+            n_synthetic = int(len(train_dataset) * synthetic_ratio)
+            if len(synthetic_dataset) < n_synthetic:
+                raise ValueError(
+                    f"Not enough synthetic pairs: need {n_synthetic} "
+                    f"(ratio={synthetic_ratio}), got {len(synthetic_dataset)}"
+                )
+            rng = random.Random(seed)
+            chosen = rng.sample(range(len(synthetic_dataset)), k=n_synthetic)
+            synthetic_dataset = torch.utils.data.Subset(synthetic_dataset, chosen)
+            print(f"  Synthetic samples: {n_synthetic} (ratio={synthetic_ratio}:1)")
+            train_dataset = ConcatDataset([train_dataset, synthetic_dataset])
+        elif mode != "baseline":
+            raise ValueError(f"Unsupported mode: {mode}")
 
     return {
         "train": _create_loader(

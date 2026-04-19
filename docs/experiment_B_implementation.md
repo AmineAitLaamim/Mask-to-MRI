@@ -403,6 +403,7 @@ Experiments D and E test whether synthetic data can compensate for reduced real 
 | D | 50% (~532) | None | ❌ No | `half_real/` |
 | E1 | 50% (~532) | 1:1 (~532) | ❌ No | `half_real_syn1to1/` |
 | E2 | 50% (~532) | 1:2 (~1064) | ❌ No | `half_real_syn1to2/` |
+| F | 0% (None) | 100% (~1065) | ❌ No | `synthetic_only/` |
 
 ### Config Parameters
 
@@ -454,6 +455,46 @@ Run folder routing:
 - `EXPERIMENT_MODE = "augmented"`, `SYNTHETIC_RATIO = 2` → `half_real_syn1to2/`
 
 To run all three experiments, re-run the notebook three times with different settings.
+
+## Experiment F: Synthetic Data Only
+
+Experiment F measures the standalone quality of the DDPM-generated images by training the segmentation model entirely on synthetic data with no real training data.
+
+### Config Parameter
+
+A new module-level flag was added to `src/experiment_B/config.py`:
+
+```python
+SYNTHETIC_ONLY = False   # default False — keeps all existing experiments intact
+```
+
+It is read at call time inside `build_experiment_b_dataloaders()`.
+
+### Loading Behavior
+
+When `SYNTHETIC_ONLY = True`:
+
+- The train dataloader uses all available synthetic pairs as training data
+- Real slices are completely excluded from training
+- Subsampling logic (`REAL_DATA_FRACTION`) and `SYNTHETIC_RATIO` are ignored
+- Val and test loaders are unaffected and always use real data
+
+### F Notebook
+
+Notebook:
+
+- `notebooks/experiment_F_train_colab.ipynb`
+
+Configuration cell:
+
+```python
+EXPERIMENT_MODE = "synthetic_only"   # fixed — do not change
+USE_AUGMENTATION = False              # always False — do not change
+SYNTHETIC_ONLY = True                 # always True — do not change
+```
+
+Run folder routing:
+- Output is sent to `synthetic_only/`
 
 ## Synthetic v2 Workflow
 

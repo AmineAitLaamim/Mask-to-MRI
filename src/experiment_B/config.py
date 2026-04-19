@@ -54,6 +54,12 @@ REAL_DATA_FRACTION = 1.0
 # Default 1 — preserves existing 1:1 behavior for experiments A, B, C.
 SYNTHETIC_RATIO = 1
 
+# Train on synthetic data only (experiment F).
+# When True, REAL_DATA_FRACTION and SYNTHETIC_RATIO are ignored for training.
+# Val and test always use real data regardless of this flag.
+# Default False — keeps all existing experiments intact.
+SYNTHETIC_ONLY = False
+
 
 CONFIG = {
     "raw_dir": _RAW_DIR,
