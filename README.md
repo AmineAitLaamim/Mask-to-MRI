@@ -30,6 +30,13 @@ Binary Tumor Mask → Med-DDPM v3 (DDIM 250 steps) → Synthetic FLAIR MRI
 
 ### Example Outputs
 
+#### Real Dataset Images (Baseline)
+| Tumor Mask | Real FLAIR MRI |
+|:---:|:---:|
+| <img src="imges/real/TCGA_CS_4944_20010208_12_mask.png" width="250" /> | <img src="imges/real/TCGA_CS_4944_20010208_12_flair.png" width="250" /> |
+| <img src="imges/real/TCGA_CS_6665_20010817_17_mask.png" width="250" /> | <img src="imges/real/TCGA_CS_6665_20010817_17_flair.png" width="250" /> |
+
+#### DDPM Generated Images (Synthetic)
 | Input Tumor Mask | Generated Synthetic FLAIR |
 |:---:|:---:|
 | <img src="imges/synthetic_0117_mask.png" width="250" /> | <img src="imges/synthetic_0117.png" width="250" /> |
