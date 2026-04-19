@@ -4,9 +4,15 @@
 
 Train a conditional DDPM to generate synthetic brain MRI FLAIR images from binary tumor segmentation masks, then use the synthetic data to augment downstream tumor segmentation.
 
+## The Problem
+
+Medical imaging datasets are often severely limited due to privacy concerns, high acquisition costs, and the need for expert annotation. For brain tumor segmentation, having only ~1,000 real training slices is often too few to train a highly robust model without extreme overfitting.
+
+**The Solution:** This project uses a Denoising Diffusion Probabilistic Model (DDPM) to artificially multiply the available dataset. By generating realistic synthetic MRI slices from randomly generated or existing tumor masks, we can safely augment the training data and improve the segmentation model's performance without requiring additional real patient data.
+
 ## Overview
 
-This project addresses data scarcity in medical imaging by:
+This project implements the solution by:
 
 1. **Training a conditional diffusion model** (Med-DDPM v3) to synthesize realistic FLAIR MRI slices from tumor masks
 2. **Generating a synthetic dataset** (~1,065 image/mask pairs) with quality filtering
@@ -85,20 +91,20 @@ Standard U-Net for single-channel FLAIR tumor segmentation.
 
 All experiments evaluated on the same **157 real test slices** using the best checkpoint (selected by highest validation Dice).
 
-| Exp | Description | Real Train | Synthetic | Aug | Test Dice | Test IoU | Test Loss |
-|-----|-------------|------------|-----------|-----|-----------|----------|-----------|
-| A | Baseline | 100% (~1065) | None | ✅ | **0.8992** | **0.8169** | 0.0988 |
-| B | Augmented | 100% (~1065) | 1:1 (~1065) | ✅ | 0.8971 | 0.8134 | 0.0939 |
-| C | Baseline no-aug | 100% (~1065) | None | ❌ | 0.8931 | 0.8069 | 0.1080 |
-| C+ | Augmented no-aug | 100% (~1065) | 1:1 (~1065) | ❌ | 0.8981 | 0.8150 | 0.1007 |
-| D | Half real | 50% (~532) | None | ❌ | 0.8894 | 0.8009 | 0.1241 |
-| E1 | Half real + syn 1:1 | 50% (~532) | 1:1 (~532) | ❌ | 0.8963 | 0.8121 | 0.0994 |
-| E2 | Half real + syn 1:2 | 50% (~532) | 1:2 (~1064) | ❌ | 0.8978 | 0.8145 | 0.0994 |
-| F | Synthetic only | 0% | 100% (~1065) | ❌ | 0.6967 | 0.5346 | 0.2756 |
+| Exp | Description | Real Train | Synthetic | Total Train | Aug | Test Dice | Test IoU | Test Loss |
+|-----|-------------|------------|-----------|-------------|-----|-----------|----------|-----------|
+| A | Baseline | 100% (~1065) | 0% (0) | ~1065 | ✅ | **0.8992** | **0.8169** | 0.0988 |
+| B | Augmented | 50% (~1065) | 50% (~1065) | ~2130 | ✅ | 0.8971 | 0.8134 | 0.0939 |
+| C | Baseline no-aug | 100% (~1065) | 0% (0) | ~1065 | ❌ | 0.8931 | 0.8069 | 0.1080 |
+| C+ | Augmented no-aug | 50% (~1065) | 50% (~1065) | ~2130 | ❌ | 0.8981 | 0.8150 | 0.1007 |
+| D | Half real | 100% (~532) | 0% (0) | ~532 | ❌ | 0.8894 | 0.8009 | 0.1241 |
+| E1 | Half real + syn 1:1 | 50% (~532) | 50% (~532) | ~1064 | ❌ | 0.8963 | 0.8121 | 0.0994 |
+| E2 | Half real + syn 1:2 | 33% (~532) | 67% (~1064) | ~1596 | ❌ | 0.8978 | 0.8145 | 0.0994 |
+| F | Synthetic only | 0% (0) | 100% (~1065) | ~1065 | ❌ | 0.6967 | 0.5346 | 0.2756 |
 
 ### Key Findings
 
-1. **Synthetic data compensates for missing real data**: D → E1 → E2 shows that adding synthetic pairs recovers most of the performance gap. E2 with only 50% real data nearly matches full-data baseline A.
+1. **Synthetic data compensates for missing real data**: D → E1 → E2 shows that adding synthetic pairs recovers most of the performance gap. E2 with only ~33% real data in the training mix nearly matches full-data baseline A.
 
 2. **Augmentation and synthetic data have comparable effects**: A vs C (+0.6% from augmentation) and C vs C+ (+0.5% from synthetic data) show similar improvements.
 

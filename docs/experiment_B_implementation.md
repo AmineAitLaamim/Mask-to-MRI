@@ -630,7 +630,7 @@ All experiments were evaluated on the same held-out **157 real test slices** usi
 
 2. **Data augmentation helps slightly**: A (0.8992) vs C (0.8931) shows a +0.6% Dice improvement from augmentation alone on real data.
 
-3. **Synthetic data compensates for missing real data**: D (0.8894) → E1 (0.8963) → E2 (0.8978) shows that adding synthetic pairs to a reduced real dataset recovers most of the performance gap. E2 with only 50% real data nearly matches the full-data baseline A.
+3. **Synthetic data compensates for missing real data**: D (0.8894) → E1 (0.8963) → E2 (0.8978) shows that adding synthetic pairs to a reduced real dataset recovers most of the performance gap. E2 with only ~33% real data in the training mix nearly matches the full-data baseline A.
 
 4. **Synthetic data without augmentation matches augmented real data**: C+ (0.8981) with synthetic data and no augmentation is comparable to A (0.8992) with augmentation but no synthetic data.
 
