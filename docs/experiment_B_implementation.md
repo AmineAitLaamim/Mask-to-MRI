@@ -369,7 +369,12 @@ MyDrive/mask-to-mri/
     │   ├── metrics/
     │   ├── plots/
     │   └── samples/
-    └── half_real_syn1to2/      ← experiment E2 (half real + 1:2 synthetic, no augmentation)
+    ├── half_real_syn1to2/      ← experiment E2 (half real + 1:2 synthetic, no augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    └── synthetic_only/         ← experiment F (synthetic data only, no real training data)
         ├── checkpoints/
         ├── metrics/
         ├── plots/
@@ -495,6 +500,143 @@ SYNTHETIC_ONLY = True                 # always True — do not change
 
 Run folder routing:
 - Output is sent to `synthetic_only/`
+
+## Test Results
+
+All experiments were evaluated on the same held-out **157 real test slices** using the `best.pt` checkpoint (selected by highest validation Dice).
+
+### Results Table
+
+| Experiment | Description | Real Train | Synthetic | Aug | Test Dice | Test IoU | Test Loss |
+|---|---|---|---|---|---|---|---|
+| A | Baseline | 100% (~1065) | None | ✅ | **0.8992** | **0.8169** | 0.0988 |
+| B | Augmented | 100% (~1065) | 1:1 (~1065) | ✅ | 0.8971 | 0.8134 | 0.0939 |
+| C | Baseline no-aug | 100% (~1065) | None | ❌ | 0.8931 | 0.8069 | 0.1080 |
+| C+ | Augmented no-aug | 100% (~1065) | 1:1 (~1065) | ❌ | 0.8981 | 0.8150 | 0.1007 |
+| D | Half real | 50% (~532) | None | ❌ | 0.8894 | 0.8009 | 0.1241 |
+| E1 | Half real + syn 1:1 | 50% (~532) | 1:1 (~532) | ❌ | 0.8963 | 0.8121 | 0.0994 |
+| E2 | Half real + syn 1:2 | 50% (~532) | 1:2 (~1064) | ❌ | 0.8978 | 0.8145 | 0.0994 |
+| F | Synthetic only | 0% | 100% (~1065) | ❌ | 0.6967 | 0.5346 | 0.2756 |
+
+### Per-Experiment Metrics
+
+#### A — Baseline (real only, with augmentation)
+
+```json
+{
+  "mode": "baseline",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/baseline/checkpoints/best.pt",
+  "loss": 0.09882667772471905,
+  "dice": 0.8992311568235712,
+  "iou": 0.816912183660796
+}
+```
+
+#### B — Augmented (real + synthetic, with augmentation)
+
+```json
+{
+  "mode": "augmented",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/augmented/checkpoints/best.pt",
+  "loss": 0.09392661340534687,
+  "dice": 0.8971222894959167,
+  "iou": 0.8134379807600237
+}
+```
+
+#### C — Baseline no-aug (real only, no augmentation)
+
+```json
+{
+  "mode": "baseline",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/baseline_noaug/checkpoints/best.pt",
+  "loss": 0.10802466627210379,
+  "dice": 0.8931160050361364,
+  "iou": 0.8068743833541763
+}
+```
+
+#### C+ — Augmented no-aug (real + synthetic, no augmentation)
+
+```json
+{
+  "mode": "augmented",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/augmented_noaug/checkpoints/best.pt",
+  "loss": 0.10065432451665401,
+  "dice": 0.8980930789377841,
+  "iou": 0.8150356296790641
+}
+```
+
+#### D — Half real (50% real, no synthetic, no augmentation)
+
+```json
+{
+  "mode": "baseline",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/half_real/checkpoints/best.pt",
+  "loss": 0.12406316846609115,
+  "dice": 0.8894166403284173,
+  "iou": 0.8008556820034982
+}
+```
+
+#### E1 — Half real + syn 1:1 (50% real + 1:1 synthetic, no augmentation)
+
+```json
+{
+  "mode": "augmented",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/half_real_syn1to1/checkpoints/best.pt",
+  "loss": 0.09940101560205221,
+  "dice": 0.8962945218914308,
+  "iou": 0.8120779192184173
+}
+```
+
+#### E2 — Half real + syn 1:2 (50% real + 1:2 synthetic, no augmentation)
+
+```json
+{
+  "mode": "augmented",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/half_real_syn1to2/checkpoints/best.pt",
+  "loss": 0.09941433332860469,
+  "dice": 0.8977970240500325,
+  "iou": 0.8145481090454696
+}
+```
+
+#### F — Synthetic only (no real training data)
+
+```json
+{
+  "mode": "baseline",
+  "split": "test",
+  "checkpoint_path": "/content/drive/MyDrive/mask-to-mri/experiment_B/synthetic_only/checkpoints/best.pt",
+  "loss": 0.27559192292392254,
+  "dice": 0.6967071310365265,
+  "iou": 0.5345752431459581
+}
+```
+
+### Key Findings
+
+1. **Baseline A is the top performer** (Dice 0.8992), but by a very slim margin over the augmented variants.
+
+2. **Data augmentation helps slightly**: A (0.8992) vs C (0.8931) shows a +0.6% Dice improvement from augmentation alone on real data.
+
+3. **Synthetic data compensates for missing real data**: D (0.8894) → E1 (0.8963) → E2 (0.8978) shows that adding synthetic pairs to a reduced real dataset recovers most of the performance gap. E2 with only 50% real data nearly matches the full-data baseline A.
+
+4. **Synthetic data without augmentation matches augmented real data**: C+ (0.8981) with synthetic data and no augmentation is comparable to A (0.8992) with augmentation but no synthetic data.
+
+5. **Synthetic-only training (F) has a large gap** (Dice 0.6967 vs 0.8992). The DDPM-generated images alone are not sufficient to train a competitive segmentation model. The model learns some structure but generalizes poorly to real anatomical distribution.
+
+6. **Loss vs Dice**: Experiment B achieves the lowest test loss (0.0939) but not the highest Dice (0.8971), confirming that best-by-Dice selection is the right strategy.
 
 ## Synthetic v2 Workflow
 
