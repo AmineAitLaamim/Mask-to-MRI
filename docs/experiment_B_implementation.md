@@ -217,7 +217,7 @@ EXPERIMENT_MODE = "augmented"
 
 ### Drive Layout
 
-The intended Drive layout is:
+The intended Drive layout for experiments A and B is:
 
 ```text
 MyDrive/mask-to-mri/
@@ -239,6 +239,8 @@ MyDrive/mask-to-mri/
         └── samples/
 ```
 
+See the **Experiments C & D** section below for the full four-experiment layout including `baseline_noaug/` and `augmented_noaug/`.
+
 ## Important Fixes Applied
 
 The following issues were found and fixed during implementation review:
@@ -255,6 +257,121 @@ The following issues were found and fixed during implementation review:
 - Local `data/synthetic/` is not relevant to the intended workflow.
 - The actual workflow assumes Colab + Google Drive only.
 - The local synthetic folder may fail validation without this being a real problem, as long as the Drive synthetic dataset is correctly prepared.
+
+## Experiments C & D: No Augmentation
+
+Experiments C and D are ablation runs that train the same U-Net with the same data but **without any data augmentation** on the train set.
+
+This isolates the effect of augmentation from the effect of adding synthetic data.
+
+### Experiment Matrix
+
+| Experiment | Mode | Augmentation | Run Folder |
+|---|---|---|---|
+| A | baseline | ✅ Yes | `baseline/` |
+| B | augmented | ✅ Yes | `augmented/` |
+| C | baseline | ❌ No | `baseline_noaug/` |
+| D | augmented | ❌ No | `augmented_noaug/` |
+
+### USE_AUGMENTATION Flag
+
+The `USE_AUGMENTATION` flag controls whether train transforms include flips and rotations.
+
+Location:
+
+- `src/experiment_B/config.py`
+
+Default:
+
+```python
+USE_AUGMENTATION = True
+```
+
+When `True` (experiments A & B), the train transform includes:
+
+- `A.HorizontalFlip(p=0.5)`
+- `A.VerticalFlip(p=0.5)`
+- `A.RandomRotate90(p=0.5)`
+
+When `False` (experiments C & D), the train transform only includes:
+
+- `A.Resize(image_size, image_size)`
+
+Val and test transforms are not affected by this flag.
+
+### Runtime Injection
+
+The flag is read at call time inside `_build_transform()` in `dataset.py`, not at module import time. This means the CD notebook can override it at runtime:
+
+```python
+from src.experiment_B import config as exp_b_config
+exp_b_config.USE_AUGMENTATION = False
+```
+
+This injection must happen before `build_experiment_b_dataloaders()` is called.
+
+### CD Notebook
+
+Notebook:
+
+- `notebooks/experiment_CD_train_colab.ipynb`
+
+This notebook is separate from the A/B notebook and must not be used for experiments A or B.
+
+Key differences from `experiment_B_train_colab.ipynb`:
+
+1. `USE_AUGMENTATION = False` is hardcoded and should not be changed
+2. `CONFIG["baseline_run_name"]` is set to `"baseline_noaug"`
+3. `CONFIG["augmented_run_name"]` is set to `"augmented_noaug"`
+4. The experiment mode cell selects between C and D:
+   - `EXPERIMENT_MODE = "baseline"` → experiment C (`baseline_noaug/`)
+   - `EXPERIMENT_MODE = "augmented"` → experiment D (`augmented_noaug/`)
+
+Everything else is identical: Drive mount, dataset restore, training loop, checkpointing, resume, evaluation.
+
+### Drive Layout (All Four Experiments)
+
+```text
+MyDrive/mask-to-mri/
+├── dataset/
+│   ├── lgg-mri-segmentation.zip
+│   ├── lgg-mri-segmentation/
+│   ├── synthetic_data.zip
+│   └── synthetic_data/
+└── experiment_B/
+    ├── baseline/               ← experiment A (real only, with augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    ├── augmented/              ← experiment B (real + synthetic, with augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    ├── baseline_noaug/         ← experiment C (real only, no augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    └── augmented_noaug/        ← experiment D (real + synthetic, no augmentation)
+        ├── checkpoints/
+        ├── metrics/
+        ├── plots/
+        └── samples/
+```
+
+### Independence
+
+Each experiment folder is fully independent:
+
+- C and D have their own `checkpoints/`, `metrics/`, `plots/`, `samples/`
+- They never share state with A or B
+- Running the CD notebook does not affect A/B checkpoints or vice versa
+
+### Evaluation
+
+After training, `evaluate_experiment_b()` is called on `best.pt` for each experiment. The run folder path passed to the evaluator matches the `_noaug` folders for C and D automatically, since the `CONFIG` run names are overridden.
 
 ## Synthetic v2 Workflow
 
