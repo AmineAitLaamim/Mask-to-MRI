@@ -28,6 +28,13 @@ Binary Tumor Mask → Med-DDPM v3 (DDIM 250 steps) → Synthetic FLAIR MRI
                                         U-Net segmentation → Dice / IoU
 ```
 
+### Example Outputs
+
+| Input Tumor Mask | Generated Synthetic FLAIR |
+|:---:|:---:|
+| <img src="imges/synthetic_0117_mask.png" width="250" /> | <img src="imges/synthetic_0117.png" width="250" /> |
+| <img src="imges/synthetic_0127_mask.png" width="250" /> | <img src="imges/synthetic_0127.png" width="250" /> |
+
 ## Dataset
 
 **LGG Segmentation** (TCGA low-grade glioma) from Kaggle:
