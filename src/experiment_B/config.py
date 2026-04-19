@@ -40,6 +40,11 @@ else:
     _DRIVE_BASE = None
 
 
+# Toggle data augmentation for train transforms.
+# Default True (experiments A & B). Set to False for experiments C & D.
+USE_AUGMENTATION = True
+
+
 CONFIG = {
     "raw_dir": _RAW_DIR,
     "synthetic_dir": _SYNTHETIC_DIR,

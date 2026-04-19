@@ -16,8 +16,12 @@ from src.dataset import get_patient_file_list, patient_level_split, _load_tif
 
 
 def _build_transform(image_size: int, augment: bool) -> A.Compose:
+    # Read USE_AUGMENTATION at call time so notebook injection takes effect.
+    from . import config as _config
+    use_aug = getattr(_config, "USE_AUGMENTATION", True)
+
     ops: list[A.BasicTransform] = [A.Resize(image_size, image_size)]
-    if augment:
+    if augment and use_aug:
         ops.extend(
             [
                 A.HorizontalFlip(p=0.5),
