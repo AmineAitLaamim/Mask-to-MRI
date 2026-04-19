@@ -354,7 +354,22 @@ MyDrive/mask-to-mri/
     │   ├── metrics/
     │   ├── plots/
     │   └── samples/
-    └── augmented_noaug/        ← experiment D (real + synthetic, no augmentation)
+    ├── augmented_noaug/        ← experiment D-old (real + synthetic, no augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    ├── half_real/              ← experiment D (half real, no synthetic, no augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    ├── half_real_syn1to1/      ← experiment E1 (half real + 1:1 synthetic, no augmentation)
+    │   ├── checkpoints/
+    │   ├── metrics/
+    │   ├── plots/
+    │   └── samples/
+    └── half_real_syn1to2/      ← experiment E2 (half real + 1:2 synthetic, no augmentation)
         ├── checkpoints/
         ├── metrics/
         ├── plots/
@@ -372,6 +387,73 @@ Each experiment folder is fully independent:
 ### Evaluation
 
 After training, `evaluate_experiment_b()` is called on `best.pt` for each experiment. The run folder path passed to the evaluator matches the `_noaug` folders for C and D automatically, since the `CONFIG` run names are overridden.
+
+## Experiments D & E: Half Real Data
+
+Experiments D and E test whether synthetic data can compensate for reduced real data availability. They train on **50%** of the real tumor-containing training slices, with and without synthetic augmentation, and **without data augmentation transforms**.
+
+### Experiment Matrix (Full)
+
+| Experiment | Real Data | Synthetic | Augmentation | Run Folder |
+|---|---|---|---|---|
+| A | 100% (~1065) | None | ✅ Yes | `baseline/` |
+| B | 100% (~1065) | 1:1 (~1065) | ✅ Yes | `augmented/` |
+| C | 100% (~1065) | None | ❌ No | `baseline_noaug/` |
+| C+ | 100% (~1065) | 1:1 (~1065) | ❌ No | `augmented_noaug/` |
+| D | 50% (~532) | None | ❌ No | `half_real/` |
+| E1 | 50% (~532) | 1:1 (~532) | ❌ No | `half_real_syn1to1/` |
+| E2 | 50% (~532) | 1:2 (~1064) | ❌ No | `half_real_syn1to2/` |
+
+### Config Parameters
+
+Two new module-level flags were added to `src/experiment_B/config.py`:
+
+```python
+REAL_DATA_FRACTION = 1.0   # default 1.0 — keeps all existing experiments intact
+SYNTHETIC_RATIO = 1        # 1 = 1:1, 2 = 1:2 synthetic-to-real
+```
+
+Both are read at call time inside `build_experiment_b_dataloaders()` (not at module import time), so notebook injection works correctly.
+
+### Subsampling Behavior
+
+When `REAL_DATA_FRACTION < 1.0`:
+
+- The full tumor-containing train split is computed first (patient-level split, then tumor filtering)
+- A deterministic subsample of `int(len(train_pairs) * REAL_DATA_FRACTION)` slices is selected using `random.Random(seed).sample()`
+- Val and test sets are **never** subsampled — always use 100%
+- The same seed produces the same subsample across runs, ensuring comparability between D, E1, and E2
+
+When `SYNTHETIC_RATIO > 1`:
+
+- The number of synthetic samples is `int(len(real_train) * SYNTHETIC_RATIO)`
+- For E2 with 532 real slices and ratio 2, this gives ~1064 synthetic samples
+- Selection is deterministic from the full synthetic pool
+
+### DE Notebook
+
+Notebook:
+
+- `notebooks/experiment_DE_train_colab.ipynb`
+
+This notebook is separate from the A/B and C/D notebooks.
+
+Configuration cell:
+
+```python
+EXPERIMENT_MODE = "baseline"   # "baseline" for D, "augmented" for E
+USE_AUGMENTATION = False        # always False — do not change
+REAL_DATA_FRACTION = 0.5       # always 0.5 — do not change
+SYNTHETIC_RATIO = 1            # 1 for E1 (1:1), 2 for E2 (1:2)
+```
+
+Run folder routing:
+
+- `EXPERIMENT_MODE = "baseline"` → `half_real/`
+- `EXPERIMENT_MODE = "augmented"`, `SYNTHETIC_RATIO = 1` → `half_real_syn1to1/`
+- `EXPERIMENT_MODE = "augmented"`, `SYNTHETIC_RATIO = 2` → `half_real_syn1to2/`
+
+To run all three experiments, re-run the notebook three times with different settings.
 
 ## Synthetic v2 Workflow
 

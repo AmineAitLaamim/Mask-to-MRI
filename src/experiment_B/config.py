@@ -44,6 +44,16 @@ else:
 # Default True (experiments A & B). Set to False for experiments C & D.
 USE_AUGMENTATION = True
 
+# Fraction of real tumor-containing training slices to use.
+# Default 1.0 — keeps all existing experiments intact.
+# Set to 0.5 for experiments D & E (half real data).
+REAL_DATA_FRACTION = 1.0
+
+# Synthetic-to-real ratio for augmented mode.
+# 1 = 1:1, 2 = 1:2 synthetic-to-real.
+# Default 1 — preserves existing 1:1 behavior for experiments A, B, C.
+SYNTHETIC_RATIO = 1
+
 
 CONFIG = {
     "raw_dir": _RAW_DIR,

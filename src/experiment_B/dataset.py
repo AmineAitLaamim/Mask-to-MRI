@@ -156,6 +156,11 @@ def _create_loader(
 
 
 def build_experiment_b_dataloaders(config: dict, mode: str = "baseline") -> dict[str, DataLoader]:
+    # Read subsampling parameters at call time so notebook injection works.
+    from . import config as _config
+    real_fraction = getattr(_config, "REAL_DATA_FRACTION", 1.0)
+    synthetic_ratio = getattr(_config, "SYNTHETIC_RATIO", 1)
+
     raw_dir = config["raw_dir"]
     image_size = config.get("image_size", 256)
     batch_size = config.get("batch_size", 4)
@@ -166,8 +171,15 @@ def build_experiment_b_dataloaders(config: dict, mode: str = "baseline") -> dict
     splits = patient_level_split(patient_data, seed=seed)
     splits = {name: _filter_tumor_pairs(pairs) for name, pairs in splits.items()}
 
+    # Subsample real training slices if REAL_DATA_FRACTION < 1.0
+    train_pairs = splits["train"]
+    if real_fraction < 1.0:
+        n = int(len(train_pairs) * real_fraction)
+        train_pairs = random.Random(seed).sample(train_pairs, n)
+        print(f"  Subsampled real training: {n}/{len(splits['train'])} slices (fraction={real_fraction})")
+
     train_dataset = RealFLAIRSegmentationDataset(
-        splits["train"], image_size=image_size, augment=True
+        train_pairs, image_size=image_size, augment=True
     )
     val_dataset = RealFLAIRSegmentationDataset(
         splits["val"], image_size=image_size, augment=False
@@ -180,15 +192,16 @@ def build_experiment_b_dataloaders(config: dict, mode: str = "baseline") -> dict
         synthetic_dataset = SyntheticPNGSegmentationDataset(
             config["synthetic_dir"], image_size=image_size, augment=True
         )
-        target_count = len(train_dataset)
-        if len(synthetic_dataset) < target_count:
+        n_synthetic = int(len(train_dataset) * synthetic_ratio)
+        if len(synthetic_dataset) < n_synthetic:
             raise ValueError(
-                f"Synthetic dataset too small for 1:1 ratio: found {len(synthetic_dataset)} pairs, "
-                f"need at least {target_count} to match the real tumor-containing train set."
+                f"Not enough synthetic pairs: need {n_synthetic} "
+                f"(ratio={synthetic_ratio}), got {len(synthetic_dataset)}"
             )
         rng = random.Random(seed)
-        chosen = rng.sample(range(len(synthetic_dataset)), k=target_count)
+        chosen = rng.sample(range(len(synthetic_dataset)), k=n_synthetic)
         synthetic_dataset = torch.utils.data.Subset(synthetic_dataset, chosen)
+        print(f"  Synthetic samples: {n_synthetic} (ratio={synthetic_ratio}:1)")
         train_dataset = ConcatDataset([train_dataset, synthetic_dataset])
     elif mode != "baseline":
         raise ValueError(f"Unsupported mode: {mode}")
